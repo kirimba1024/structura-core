@@ -195,6 +195,7 @@ def main():
             glass_dome = (
                 dilation(bubble_volume, float(args.glass_thickness)) & ~bubble_volume
             )
+            glass_gap_air = np.zeros_like(bubble_volume)
         glass_dome[:, :base_y, :] = False
         shift_x = margin + bubble_padding[0][0]
         shift_z = margin + bubble_padding[2][0]
