@@ -1,6 +1,6 @@
-# structura-structures
+# structura-core
 
-Reusable structure-processing core extracted from Structura. It owns:
+Reusable Minecraft Java 1.21.1 structure-processing core. It owns:
 
 - validated Java Structure NBT I/O;
 - legacy schematic conversion and numeric analysis;
@@ -8,7 +8,7 @@ Reusable structure-processing core extracted from Structura. It owns:
 - loot, connector, template-pool and worldgen JSON generators.
 
 The library targets Minecraft Java 1.21.1 by default. Version constants live
-in `structura_structures.version`; callers can still pass an explicit Amulet
+in `structura_core.version`; callers can still pass an explicit Amulet
 translation target to the legacy converter.
 
 ```bash

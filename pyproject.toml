@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "structura-structures"
+name = "structura-core"
 version = "0.1.0"
 description = "Validated Minecraft Structure NBT, voxel geometry and worldgen tooling"
 readme = "README.md"
@@ -18,26 +18,26 @@ dependencies = [
 legacy = ["amulet-core>=1.9,<2"]
 
 [project.scripts]
-structura-analyze = "structura_structures.analyze:main"
-structura-convert-legacy = "structura_structures.convert_legacy:main"
-structura-envelope = "structura_structures.envelope:main"
-structura-terrain-pod = "structura_structures.terrain_pod:main"
-structura-stone-pad = "structura_structures.stone_pad:main"
-structura-add-chest-loot = "structura_structures.chest_loot:main"
-structura-add-default-loot = "structura_structures.default_loot:main"
-structura-build-loot-tables = "structura_structures.loot_tables:main"
-structura-build-biome-tags = "structura_structures.biome_tags:main"
-structura-build-processor-list = "structura_structures.processor_list:main"
-structura-build-worldgen = "structura_structures.worldgen:main"
-structura-build-connectors = "structura_structures.connectors:main"
-structura-add-house-port = "structura_structures.house_port:main"
-structura-export-schematic = "structura_structures.export_schematic:main"
-structura-check-doors = "structura_structures.check_doors:main"
-structura-check-leaks = "structura_structures.check_leaks:main"
-structura-debug-interior-air = "structura_structures.debug_interior_air:main"
+structura-analyze = "structura_core.analyze:main"
+structura-convert-legacy = "structura_core.convert_legacy:main"
+structura-envelope = "structura_core.envelope:main"
+structura-terrain-pod = "structura_core.terrain_pod:main"
+structura-stone-pad = "structura_core.stone_pad:main"
+structura-add-chest-loot = "structura_core.chest_loot:main"
+structura-add-default-loot = "structura_core.default_loot:main"
+structura-build-loot-tables = "structura_core.loot_tables:main"
+structura-build-biome-tags = "structura_core.biome_tags:main"
+structura-build-processor-list = "structura_core.processor_list:main"
+structura-build-worldgen = "structura_core.worldgen:main"
+structura-build-connectors = "structura_core.connectors:main"
+structura-add-house-port = "structura_core.house_port:main"
+structura-export-schematic = "structura_core.export_schematic:main"
+structura-check-doors = "structura_core.check_doors:main"
+structura-check-leaks = "structura_core.check_leaks:main"
+structura-debug-interior-air = "structura_core.debug_interior_air:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [project.urls]
-Repository = "https://github.com/kirimba1024/structura-structures"
+Repository = "https://github.com/kirimba1024/structura-core"
