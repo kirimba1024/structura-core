@@ -9,10 +9,9 @@ from amulet_nbt import (
 from .nbt import Structure, save_structure
 
 AXIS = {"west": (0, -1), "east": (0, 1), "north": (2, -1), "south": (2, 1)}
-FLOOR = "minecraft:dirt_path"
 
 
-def corridor_cells(axis, sign, boundary, cavern_edge, floor_y, center):
+def corridor_cells(axis, sign, boundary, cavern_edge, floor_y, center, floor_block):
     lo, hi = sorted((boundary, cavern_edge - sign))
     for pos in range(lo, hi + 1):
         for w in (-1, 0, 1):
@@ -26,7 +25,7 @@ def corridor_cells(axis, sign, boundary, cavern_edge, floor_y, center):
             floor[axis] = pos
             floor[1] = floor_y - 1
             floor[2 - axis] = center + w
-            yield tuple(floor), FLOOR
+            yield tuple(floor), floor_block
 
 
 def find_cavern_edge(src, door_pos, axis, sign, size):
@@ -78,6 +77,7 @@ def main():
     parser.add_argument("--door-z", type=int, required=True)
     parser.add_argument("--facing", choices=AXIS, required=True)
     parser.add_argument("--pool", default="structura:connectors/surface")
+    parser.add_argument("--floor", default="minecraft:dirt_path")
     args = parser.parse_args()
 
     axis, sign = AXIS[args.facing]
@@ -91,7 +91,7 @@ def main():
     cavern_edge = find_cavern_edge(src, door_pos, axis, sign, size)
 
     additions = list(
-        corridor_cells(axis, sign, boundary, cavern_edge, args.door_y, center),
+        corridor_cells(axis, sign, boundary, cavern_edge, args.door_y, center, args.floor),
     )
     save_structure(src, args.dst, size, replacements=additions)
 
