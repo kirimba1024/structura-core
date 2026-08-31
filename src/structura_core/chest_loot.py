@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Heuristically drop looted chests into a structure's enclosed rooms.
 
-Runs on the pristine source, before build_envelope.py, so every downstream
-variant (surface, underground, underwater) inherits the same chests.
+Runs on the pristine source, before envelope.py, so every downstream
+variant (surface, sky, underwater) inherits the same chests.
 """
 import argparse
 import math

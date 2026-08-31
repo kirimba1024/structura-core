@@ -369,12 +369,16 @@ def main():
         parser.error("--pit-count and --pit-protect-margin must be non-negative")
     if args.pit_min_radius <= 0 or args.pit_max_radius < args.pit_min_radius:
         parser.error("--pit-max-radius must be >= --pit-min-radius > 0")
+    if args.geoid_amount < 0:
+        parser.error("--geoid-amount must be non-negative")
+    if args.geoid_cell < 1:
+        parser.error("--geoid-cell must be at least 1")
 
     ground = None if args.no_auto_ground else ground_palette(src, raw_footprint, base_y)
 
     margin = math.ceil(
         args.top_radius + args.bulge + 2 * args.rounding + 2 * args.smoothing
-        + args.curve_amount + args.side_bulge
+        + args.curve_amount + args.side_bulge + args.geoid_amount
     ) + 2
     raw_footprint = np.pad(raw_footprint, margin)
     footprint = rounded_footprint(

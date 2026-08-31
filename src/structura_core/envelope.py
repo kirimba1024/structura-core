@@ -148,7 +148,7 @@ def main():
     padding = ((margin, margin), (margin, margin), (margin, margin))
     solid = np.pad(solid, padding)
     explicit_air = np.pad(explicit_air, padding)
-    base_y = int(np.flatnonzero(solid.any(axis=(0, 2)))[0])
+    base_y = detect_base_y(src, solid, margin)
 
     envelope, surface, interior_air, aura, cavern_aura = compute_masks(
         solid, args.envelope_radius, args.aura_radius,
