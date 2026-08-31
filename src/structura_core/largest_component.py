@@ -34,7 +34,7 @@ def keep_largest_component(blocks):
     return filtered, len(blocks) - len(filtered)
 
 
-def clean_structure(src_path, dst_path):
+def clean_structure(src_path, dst_path, report_only=False):
     src = Structure(src_path)
     solids = [
         (pos, index) for pos, index in src.present.items()
@@ -44,6 +44,9 @@ def clean_structure(src_path, dst_path):
     keep = {pos for pos, _ in filtered}
     removed_positions = [pos for pos, _ in solids if pos not in keep]
     names = sorted({src.name_at(pos) for pos in removed_positions})
+    print(f"removed={removed} blocks={names}")
+    if report_only:
+        return
     src.present = {
         pos: index for pos, index in src.present.items()
         if src.palette[index] in AIR_NAMES or pos in keep
@@ -52,15 +55,20 @@ def clean_structure(src_path, dst_path):
         pos: nbt for pos, nbt in src.block_nbt.items() if pos in src.present
     }
     save_structure(src, dst_path, src.size)
-    print(f"removed={removed} blocks={names}")
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("src")
-    parser.add_argument("dst")
+    parser.add_argument("dst", nargs="?")
+    parser.add_argument(
+        "--report-only", action="store_true",
+        help="print what would be removed, write nothing",
+    )
     args = parser.parse_args()
-    clean_structure(args.src, args.dst)
+    if not args.report_only and not args.dst:
+        parser.error("dst is required unless --report-only")
+    clean_structure(args.src, args.dst, args.report_only)
 
 
 if __name__ == "__main__":

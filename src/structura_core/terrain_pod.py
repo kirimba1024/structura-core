@@ -320,9 +320,14 @@ def main():
     parser.add_argument("--dirt", default="minecraft:dirt")
     parser.add_argument("--stone", default="minecraft:stone")
     parser.add_argument(
-        "--no-auto-ground", action="store_true",
-        help="always use --grass, even if natural ground blocks are found at "
-             "the source footprint",
+        "--auto-ground", action="store_true",
+        help="scatter the pod's surface material with a weighted sample of "
+             "whatever natural ground blocks (dirt, gravel, ...) sit under "
+             "the source footprint, instead of plain --grass everywhere; "
+             "off by default -- the source sample is usually a stray patch "
+             "near the door, not a deliberate ground texture, and scattering "
+             "it via patch noise across the whole pod reads as random dirt "
+             "blotches rather than terrain",
     )
     parser.add_argument(
         "--no-hidden-top", action="store_true",
@@ -374,7 +379,7 @@ def main():
     if args.geoid_cell < 1:
         parser.error("--geoid-cell must be at least 1")
 
-    ground = None if args.no_auto_ground else ground_palette(src, raw_footprint, base_y)
+    ground = ground_palette(src, raw_footprint, base_y) if args.auto_ground else None
 
     margin = math.ceil(
         args.top_radius + args.bulge + 2 * args.rounding + 2 * args.smoothing
