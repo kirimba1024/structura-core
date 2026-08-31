@@ -100,20 +100,23 @@ def main():
         replacements.append((door_pos, lower))
         replacements.append((upper_pos, upper))
         reinforcement = []
-        for dw in (-1, 1):
-            for dy in (0, 1):
-                post = list(door_pos)
-                post[perp] += dw
-                post[1] += dy
-                reinforcement.append(tuple(post))
-        for dw in (-1, 0, 1):
-            lintel = list(door_pos)
-            lintel[perp] += dw
-            lintel[1] += 2
-            reinforcement.append(tuple(lintel))
-        sill = list(door_pos)
-        sill[1] -= 1
-        reinforcement.append(tuple(sill))
+        for dd in (0, 1, 2):
+            depth = list(door_pos)
+            depth[axis] += dd * sign
+            for dw in (-1, 1):
+                for dy in (0, 1):
+                    post = list(depth)
+                    post[perp] += dw
+                    post[1] += dy
+                    reinforcement.append(tuple(post))
+            for dw in (-1, 0, 1):
+                lintel = list(depth)
+                lintel[perp] += dw
+                lintel[1] += 2
+                reinforcement.append(tuple(lintel))
+            sill = list(depth)
+            sill[1] -= 1
+            reinforcement.append(tuple(sill))
         for pos in reinforcement:
             if src.is_air(pos):
                 replacements.append((pos, FRAME))
