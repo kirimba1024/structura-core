@@ -38,6 +38,21 @@ def compute_masks(solid, envelope_radius, aura_radius, cavern_radius, base_y):
     return envelope, surface, interior_air, aura, cavern_aura
 
 
+def detect_base_y(src, solid, margin):
+    """The lowest Y with any solid block can be pulled down by an outlier
+    (a doorstep, a lamp-post foundation, a single low decoration) below the
+    building's real floor/yard level. minecraft:grass_block marks that
+    real level directly -- use the Y with the most of it, falling back to
+    the old any-solid rule only when the source has no grass at all."""
+    counts = {}
+    for (_x, y, _z), index in src.present.items():
+        if src.palette[index] == "minecraft:grass_block":
+            counts[y] = counts.get(y, 0) + 1
+    if counts:
+        return max(counts, key=counts.get) + margin
+    return int(np.flatnonzero(solid.any(axis=(0, 2)))[0])
+
+
 def adaptive_cavern_radius(solid, minimum=3.0, maximum=6.5):
     y = np.argwhere(solid)[:, 1]
     low, high = np.quantile(y, (0.05, 0.95))
