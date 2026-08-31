@@ -5,7 +5,7 @@ Reusable Minecraft Java 1.21.1 structure-processing core. It owns:
 - validated Java Structure NBT I/O;
 - legacy schematic conversion and numeric analysis;
 - NumPy/SciPy envelope, terrain-pod and foundation geometry;
-- loot, connector, template-pool and worldgen JSON generators.
+- loot, template-pool and worldgen JSON generators.
 
 The library targets Minecraft Java 1.21.1 by default. Version constants live
 in `structura_core.version`; callers can still pass an explicit Amulet
