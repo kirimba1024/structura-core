@@ -17,12 +17,9 @@ from scipy import ndimage
 
 from .check_doors import find_doors
 from .nbt import Structure, save_structure
+from .paths import hash3, jittered_route, merge_cells
 
 AXIS = {"west": (0, -1), "east": (0, 1), "north": (2, -1), "south": (2, 1)}
-
-
-def hash3(x, y, z, salt):
-    return (x * 73856093 ^ y * 19349663 ^ z * 83492791 ^ salt) & 0xff
 
 
 def column_top(pod, x, z):
@@ -56,35 +53,8 @@ def pick_anchor(pod, pod2d, axis, sign, perp_lo, perp_hi, salt, index, attempts=
     return None
 
 
-def line_cells(a, b):
-    x0, z0 = a
-    x1, z1 = b
-    dx, dz = abs(x1 - x0), abs(z1 - z0)
-    sx = 1 if x1 > x0 else -1
-    sz = 1 if z1 > z0 else -1
-    err = dx - dz
-    x, z = x0, z0
-    cells = []
-    while True:
-        cells.append((x, z))
-        if x == x1 and z == z1:
-            break
-        e2 = 2 * err
-        if e2 > -dz:
-            err -= dz
-            x += sx
-        if e2 < dx:
-            err += dx
-            z += sz
-    return cells
-
-
 def path_cells(pod, protect, hub_xz, anchor_xz, floor_block, salt, index, torch_block=None, torch_interval=5):
-    mx = (hub_xz[0] + anchor_xz[0]) // 2 + (hash3(index, 1, 1, salt) % 7 - 3)
-    mz = (hub_xz[1] + anchor_xz[1]) // 2 + (hash3(index, 2, 2, salt) % 7 - 3)
-    mx = max(0, min(pod.shape[0] - 1, mx))
-    mz = max(0, min(pod.shape[2] - 1, mz))
-    route = line_cells(hub_xz, (mx, mz)) + line_cells((mx, mz), anchor_xz)
+    route = jittered_route(hub_xz, anchor_xz, (pod.shape[0], pod.shape[2]), salt, index)
     prev = None
     for i, (x, z) in enumerate(route):
         if protect[x, z]:
@@ -108,21 +78,6 @@ def path_cells(pod, protect, hub_xz, anchor_xz, floor_block, salt, index, torch_
                 if ty is not None:
                     yield (tx, ty + 1, tz), torch_block
         prev = (x, z)
-
-
-AIR = "minecraft:air"
-
-
-def merge_cells(merged, cells):
-    for pos, state in cells:
-        current = merged.get(pos)
-        if current is None or current == state:
-            merged[pos] = state
-        elif current == AIR:
-            merged[pos] = state
-        # else: keep the existing solid state -- a solid block always wins
-        # over air, so two crossing corridors never eat a hole in each
-        # other's floor.
 
 
 def build_network(

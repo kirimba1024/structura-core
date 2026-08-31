@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
 """Cut sealed door sockets into a glass dome's own contour, each wired as a
 structura:route_port Jigsaw. Closed doors block water, so this is safe with
-or without anything ever connecting -- no separate village-only variant."""
+or without anything ever connecting -- no separate village-only variant.
+
+Also lays a room-floor path network from the building's own ground-floor
+door(s) to each dome door, since the fitted bubble leaves real open floor
+between the building and the glass -- same hub-and-spokes idea as
+house_port.py's --auto-network, but flat (fixed Y, no pod to follow) and
+lit with lanterns instead of torches, which don't survive underwater."""
 import argparse
 
+import numpy as np
 from amulet_nbt import (
     CompoundTag, IntTag, ListTag, NamedTag, StringTag, load as load_nbt,
 )
-from .nbt import Structure, save_structure
+from scipy import ndimage
+
+from .check_doors import find_doors
+from .nbt import AIR_NAMES, Structure, save_structure
+from .paths import hash3, jittered_route, merge_cells
 
 AXIS = {"west": (0, -1), "east": (0, 1), "north": (2, -1), "south": (2, 1)}
 HINGE = {"west": "left", "east": "left", "north": "left", "south": "left"}
@@ -23,6 +34,38 @@ def find_wall(src, center, axis, sign, size):
             return pos
         pos += sign
     return pos
+
+
+def floor_occupancy(src, y, size):
+    grid = np.zeros((size[0], size[2]), dtype=bool)
+    for (x, yy, z), index in src.present.items():
+        if yy == y and src.palette[index] not in AIR_NAMES:
+            grid[x, z] = True
+    return grid
+
+
+def room_path_cells(
+    protect, hub_xz, target_xz, y, floor_block, salt, index,
+    light_block=None, light_interval=5,
+):
+    route = jittered_route(hub_xz, target_xz, protect.shape, salt, index)
+    prev = None
+    for i, (x, z) in enumerate(route):
+        if protect[x, z]:
+            prev = (x, z)
+            continue
+        yield (x, y, z), floor_block
+        yield (x, y + 1, z), "minecraft:air"
+        yield (x, y + 2, z), "minecraft:air"
+        if light_block and light_interval > 0 and i % light_interval == 0 and prev is not None:
+            dx, dz = x - prev[0], z - prev[1]
+            px, pz = -dz, dx
+            if hash3(x, z, index, salt) % 2:
+                px, pz = -px, -pz
+            tx, tz = x + px, z + pz
+            if 0 <= tx < protect.shape[0] and 0 <= tz < protect.shape[1] and not protect[tx, tz]:
+                yield (tx, y + 1, tz), light_block
+        prev = (x, z)
 
 
 def door_state(facing):
@@ -73,6 +116,11 @@ def main():
         "--directions", default="north,south,east,west",
         help="comma-separated subset of north,south,east,west",
     )
+    parser.add_argument("--no-paths", action="store_true")
+    parser.add_argument("--floor", default="minecraft:sand")
+    parser.add_argument("--light", default="minecraft:lantern")
+    parser.add_argument("--light-interval", type=int, default=5)
+    parser.add_argument("--salt", type=int, default=1)
     args = parser.parse_args()
 
     directions = [d.strip() for d in args.directions.split(",") if d.strip()]
@@ -84,7 +132,7 @@ def main():
     size = src.size
     center = (args.center_x, args.center_y, args.center_z)
 
-    replacements = []
+    merged = {}
     ports = []
     for facing in directions:
         axis, sign = AXIS[facing]
@@ -97,8 +145,7 @@ def main():
         upper_pos = tuple(
             v + (1 if i == 1 else 0) for i, v in enumerate(door_pos)
         )
-        replacements.append((door_pos, lower))
-        replacements.append((upper_pos, upper))
+        merge_cells(merged, [(door_pos, lower), (upper_pos, upper)])
         reinforcement = []
         for dd in (0, 1, 2):
             depth = list(door_pos)
@@ -119,9 +166,39 @@ def main():
             reinforcement.append(tuple(sill))
         for pos in reinforcement:
             if src.is_air(pos):
-                replacements.append((pos, FRAME))
+                merge_cells(merged, [(pos, FRAME)])
         ports.append((door_pos, facing))
 
+    if not args.no_paths and ports:
+        floor_y = center[1]
+        protect = ndimage.binary_dilation(
+            floor_occupancy(src, floor_y, size), iterations=1,
+        )
+        doors = find_doors(src)
+        ground_y = min((y for (_x, y, _z), _f, _v in doors), default=None)
+        door_nodes = [
+            (x + vx, y, z + vz) for (x, y, z), _f, (vx, vy, vz) in doors
+            if ground_y is not None and y <= ground_y + 3
+        ]
+        hub_xz = (door_nodes[0][0], door_nodes[0][2]) if door_nodes else (center[0], center[2])
+        for i, other in enumerate(door_nodes[1:]):
+            merge_cells(
+                merged,
+                room_path_cells(
+                    protect, hub_xz, (other[0], other[2]), floor_y, args.floor,
+                    args.salt, 100 + i, args.light, args.light_interval,
+                ),
+            )
+        for index, (door_pos, facing) in enumerate(ports):
+            merge_cells(
+                merged,
+                room_path_cells(
+                    protect, hub_xz, (door_pos[0], door_pos[2]), floor_y, args.floor,
+                    args.salt, index, args.light, args.light_interval,
+                ),
+            )
+
+    replacements = list(merged.items())
     save_structure(src, args.dst, size, replacements=replacements)
     for pos, facing in ports:
         place_jigsaw(args.dst, pos, facing, args.pool)
