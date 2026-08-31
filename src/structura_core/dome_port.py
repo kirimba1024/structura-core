@@ -17,8 +17,8 @@ from amulet_nbt import (
 from scipy import ndimage
 
 from .check_doors import find_doors
-from .nbt import AIR_NAMES, Structure, save_structure
-from .paths import hash3, jittered_route, merge_cells
+from .nbt import Structure, save_structure
+from .paths import hash3, jittered_route, merge_cells, wall_mask
 
 AXIS = {"west": (0, -1), "east": (0, 1), "north": (2, -1), "south": (2, 1)}
 HINGE = {"west": "left", "east": "left", "north": "left", "south": "left"}
@@ -34,14 +34,6 @@ def find_wall(src, center, axis, sign, size):
             return pos
         pos += sign
     return pos
-
-
-def floor_occupancy(src, y, size):
-    grid = np.zeros((size[0], size[2]), dtype=bool)
-    for (x, yy, z), index in src.present.items():
-        if yy == y and src.palette[index] not in AIR_NAMES:
-            grid[x, z] = True
-    return grid
 
 
 def room_path_cells(
@@ -171,9 +163,8 @@ def main():
 
     if not args.no_paths and ports:
         floor_y = center[1]
-        protect = ndimage.binary_dilation(
-            floor_occupancy(src, floor_y, size), iterations=1,
-        )
+        protect = wall_mask(src, floor_y + 1, floor_y + 6, (size[0], size[2]))
+        protect = ndimage.binary_dilation(protect, iterations=1)
         doors = find_doors(src)
         ground_y = min((y for (_x, y, _z), _f, _v in doors), default=None)
         door_nodes = [

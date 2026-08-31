@@ -17,7 +17,7 @@ from scipy import ndimage
 
 from .check_doors import find_doors
 from .nbt import Structure, save_structure
-from .paths import hash3, jittered_route, merge_cells
+from .paths import hash3, jittered_route, merge_cells, wall_mask
 
 AXIS = {"west": (0, -1), "east": (0, 1), "north": (2, -1), "south": (2, 1)}
 
@@ -85,7 +85,8 @@ def build_network(
     torch_block=None, torch_interval=5, make_ports=True,
 ):
     pod2d = pod.any(axis=1)
-    protect = ndimage.binary_dilation(raw_footprint, iterations=2)
+    coords = np.argwhere(raw_footprint)
+    center = coords.mean(axis=0)
 
     doors = find_doors(src)
     ground_y = min((y for (_x, y, _z), _facing, _vec in doors), default=None)
@@ -93,11 +94,17 @@ def build_network(
         (x + vx, y, z + vz) for (x, y, z), _facing, (vx, vy, vz) in doors
         if ground_y is not None and y <= ground_y + 3
     ]
+    floor_y = door_nodes[0][1] if door_nodes else (
+        column_top(pod, int(center[0]), int(center[1])) or 0
+    )
+    protect = wall_mask(
+        src, floor_y + 1, floor_y + 6, (pod.shape[0], pod.shape[2]),
+    )
+    protect = ndimage.binary_dilation(protect, iterations=1)
+
     if door_nodes:
         hub = door_nodes[0]
     else:
-        coords = np.argwhere(raw_footprint)
-        center = coords.mean(axis=0)
         yard = pod2d & ~protect
         yc = np.argwhere(yard)
         if len(yc):
