@@ -169,7 +169,7 @@ def hash3(x, y, z, salt):
     return (x * 73856093 ^ y * 19349663 ^ z * 83492791 ^ salt) & 0xff
 
 
-STONE_PATCH = 4
+STONE_PATCH = 8
 
 NATURAL_GROUND_BLOCKS = {
     "minecraft:grass_block", "minecraft:dirt", "minecraft:coarse_dirt",
@@ -216,17 +216,26 @@ def patch_noise(shape, cell, salt):
     return smooth[:shape[0], :shape[1]]
 
 
+def patch_noise_3d(shape, cell, salt):
+    lattice_shape = tuple(s // cell + 2 for s in shape)
+    lattice = np.array([
+        [[hash3(gx, gy, gz, salt) for gz in range(lattice_shape[2])]
+         for gy in range(lattice_shape[1])]
+        for gx in range(lattice_shape[0])
+    ], dtype=np.float64) / 255.0
+    smooth = ndimage.zoom(lattice, cell, order=1, mode="nearest")
+    return smooth[:shape[0], :shape[1], :shape[2]]
+
+
 def pod_blocks(pod, soil_depth, grass, dirt, stone, hidden_top=None, ground=None):
     surface_dist = ndimage.distance_transform_edt(pod)
     grass_mask = pod & ~np.pad(pod, ((0, 0), (0, 1), (0, 0)))[:, 1:, :]
     if hidden_top is not None:
         grass_mask[:, -1, :] &= ~hidden_top
 
-    stone_variants = (
-        stone, "minecraft:andesite",
-        "minecraft:mossy_cobblestone", "minecraft:moss_block",
-    )
+    stone_variants = (stone, "minecraft:andesite", "minecraft:mossy_cobblestone")
     surface_noise = patch_noise((pod.shape[0], pod.shape[2]), PATCH_CELL, 6)
+    stone_noise = patch_noise_3d(pod.shape, STONE_PATCH, 2)
     for x, y, z in np.argwhere(pod):
         if grass_mask[x, y, z]:
             material = (
@@ -235,8 +244,8 @@ def pod_blocks(pod, soil_depth, grass, dirt, stone, hidden_top=None, ground=None
         elif surface_dist[x, y, z] <= soil_depth:
             material = "minecraft:coarse_dirt" if hash3(x, y, z, 1) < 60 else dirt
         else:
-            patch = hash3(x // STONE_PATCH, y // STONE_PATCH, z // STONE_PATCH, 2)
-            material = stone_variants[patch % len(stone_variants)]
+            index = int(stone_noise[x, y, z] * len(stone_variants))
+            material = stone_variants[min(index, len(stone_variants) - 1)]
         yield (int(x), int(y), int(z)), material
 
 
