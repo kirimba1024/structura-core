@@ -8,7 +8,6 @@ from .nbt import Structure, save_structure
 
 AXIS = {"west": (0, -1), "east": (0, 1), "north": (2, -1), "south": (2, 1)}
 HINGE = {"west": "left", "east": "left", "north": "left", "south": "left"}
-FRAME = "minecraft:glass"
 
 
 def find_wall(src, center, axis, sign, size):
@@ -54,7 +53,6 @@ def main():
     doors = []
     for facing in directions:
         axis, sign = AXIS[facing]
-        perp = 2 - axis
         wall = find_wall(src, center, axis, sign, size)
         door_pos = list(center)
         door_pos[axis] = wall - sign
@@ -65,27 +63,6 @@ def main():
         )
         replacements.append((door_pos, lower))
         replacements.append((upper_pos, upper))
-        for dd in (0, 1, 2):
-            depth = list(door_pos)
-            depth[axis] += dd * sign
-            reinforcement = []
-            for dw in (-1, 1):
-                for dy in (0, 1):
-                    post = list(depth)
-                    post[perp] += dw
-                    post[1] += dy
-                    reinforcement.append(tuple(post))
-            for dw in (-1, 0, 1):
-                lintel = list(depth)
-                lintel[perp] += dw
-                lintel[1] += 2
-                reinforcement.append(tuple(lintel))
-            sill = list(depth)
-            sill[1] -= 1
-            reinforcement.append(tuple(sill))
-            for pos in reinforcement:
-                if src.is_air(pos):
-                    replacements.append((pos, FRAME))
         doors.append((door_pos, facing))
 
     save_structure(src, args.dst, size, replacements=replacements)

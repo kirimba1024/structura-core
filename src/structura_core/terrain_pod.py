@@ -324,6 +324,13 @@ def main():
         help="always use --grass, even if natural ground blocks are found at "
              "the source footprint",
     )
+    parser.add_argument(
+        "--no-hidden-top", action="store_true",
+        help="don't blank the top layer under the building footprint -- for "
+             "a flush pod (e.g. underwater, top-radius=bulge=0) the pod's "
+             "own footprint IS the building footprint, so that masking "
+             "would wipe out nearly the entire visible surface",
+    )
     parser.add_argument("--masks", help="optional compressed NumPy debug file")
     args = parser.parse_args()
 
@@ -406,7 +413,7 @@ def main():
         itertools.chain(
             pod_blocks(
                 pod, args.soil_depth, args.grass, args.dirt, args.stone,
-                raw_footprint, ground,
+                None if args.no_hidden_top else raw_footprint, ground,
             ),
             vine_blocks(
                 pod, args.vine_density, args.vine_length,
