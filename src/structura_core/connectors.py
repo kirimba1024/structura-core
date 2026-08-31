@@ -20,6 +20,12 @@ MATERIALS = {
     "underwater": ("minecraft:oxidized_cut_copper", "minecraft:oxidized_cut_copper", "minecraft:sea_lantern", "minecraft:glass"),
 }
 
+UNDERWATER_GLASS_VARIANTS = (
+    "minecraft:glass",
+    "minecraft:light_blue_stained_glass",
+    "minecraft:tinted_glass",
+)
+
 
 def state(name, **properties):
     return name, tuple(sorted((key, str(value).lower()) for key, value in properties.items()))
@@ -125,8 +131,9 @@ def open_slice(piece, z, floor, trim):
     piece.put((WIDTH - 2, 1, z), trim)
 
 
-def shell(piece, profile, *, cap=False):
+def shell(piece, profile, *, cap=False, wall_override=None):
     frame, floor, trim, wall = MATERIALS[profile]
+    wall = wall_override or wall
     end = piece.size[2] - 1
     round_tube = profile in ("cave", "underwater")
     for z in range(piece.size[2]):
@@ -162,10 +169,10 @@ def shell(piece, profile, *, cap=False):
         piece.put((WIDTH // 2, 2, end), trim)
 
 
-def make_piece(profile, kind):
+def make_piece(profile, kind, wall_override=None):
     length = {"adapter": 7, "straight": 9, "cap": 5}[kind]
     piece = Piece(length)
-    shell(piece, profile, cap=kind == "cap")
+    shell(piece, profile, cap=kind == "cap", wall_override=wall_override)
     piece.port(0, "north", "minecraft:empty")
     if kind != "cap":
         piece.port(length - 1, "south", f"structura:routes/{profile}")
@@ -193,22 +200,36 @@ def build(root):
     structures = root / "structure" / "connectors"
     pools = root / "worldgen" / "template_pool" / "connectors"
     routes = root / "worldgen" / "template_pool" / "routes"
+    piece_count = 0
     for profile in MATERIALS:
-        for kind in ("adapter", "straight", "cap"):
+        for kind in ("adapter", "cap"):
             make_piece(profile, kind).save(structures / f"{profile}_{kind}.nbt")
+            piece_count += 1
         write_json(pools / f"{profile}.json", {
             "fallback": "minecraft:empty",
             "elements": [pool(f"structura:connectors/{profile}_adapter")],
         })
+        if profile == "underwater":
+            straight_elements = []
+            for i, glass in enumerate(UNDERWATER_GLASS_VARIANTS):
+                name = f"{profile}_straight_{i}"
+                make_piece(profile, "straight", wall_override=glass).save(structures / f"{name}.nbt")
+                piece_count += 1
+                straight_elements.append(pool(f"structura:connectors/{name}"))
+        else:
+            make_piece(profile, "straight").save(structures / f"{profile}_straight.nbt")
+            piece_count += 1
+            straight_elements = [pool(f"structura:connectors/{profile}_straight")]
         write_json(routes / f"{profile}.json", {
             "fallback": "minecraft:empty",
             "elements": [
-                pool(f"structura:connectors/{profile}_straight", 4),
+                *[{**element, "weight": 4 // len(straight_elements) or 1} for element in straight_elements],
                 pool(f"structura:connectors/{profile}_cap", 1),
             ],
         })
-    print(f"built {len(MATERIALS) * 3} pieces in {root}")
+    print(f"built {piece_count} pieces in {root}")
     print(f"port={PORT_ID} frame=5x5 clearance=3x3 floor_y=0")
+    print(f"underwater straight variants: {len(UNDERWATER_GLASS_VARIANTS)} ({', '.join(UNDERWATER_GLASS_VARIANTS)})")
 
 
 def main():
