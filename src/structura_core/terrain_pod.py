@@ -66,7 +66,7 @@ def pod_depth(inradius, top_radius, bulge, max_depth=None):
 
 def build_pod(
     footprint, base_y, depth, profile, smoothing, offsets=None, roundness=0.0,
-    side_bulge=0.0,
+    side_bulge=0.0, geoid_amount=0.0, geoid_cell=14, geoid_salt=7,
 ):
     field = signed_distance(footprint)
     coords = np.argwhere(footprint)
@@ -82,6 +82,9 @@ def build_pod(
         (profile - profile[0]) / (profile.max() - profile[0] + 1e-9), 0.0, None,
     )
     side_lobes = np.clip(np.cos(4 * np.arctan2(grid[1], grid[0])), 0.0, None)
+    geoid_field = None
+    if geoid_amount > 0:
+        geoid_field = patch_noise(footprint.shape, geoid_cell, geoid_salt) * 2.0 - 1.0
     pod = np.zeros((footprint.shape[0], base_y + depth, footprint.shape[1]), dtype=bool)
     top_y = base_y + depth - 1
     for layer, radius in enumerate(profile):
@@ -89,6 +92,8 @@ def build_pod(
         layer_field = field if circle_r <= 0 else np.minimum(field, disk_dist - circle_r)
         if side_bulge > 0:
             layer_field = layer_field - side_bulge * rise_frac[layer] * side_lobes
+        if geoid_field is not None:
+            layer_field = layer_field - geoid_amount * rise_frac[layer] * geoid_field
         dx, dz = offsets[layer] if offsets is not None else (0.0, 0.0)
         layer_field = layer_field if dx == 0 and dz == 0 else ndimage.shift(
             layer_field, (-dx, -dz), order=1, mode="constant", cval=layer_field.max() + 1,
@@ -97,6 +102,40 @@ def build_pod(
     if smoothing > 0:
         field3d = ndimage.gaussian_filter(pod.astype(np.float32), sigma=smoothing)
         pod = field3d >= 0.5
+    return pod
+
+
+def keep_largest_component(pod):
+    labels, count = ndimage.label(pod, structure=np.ones((3, 3, 3)))
+    if count <= 1:
+        return pod
+    sizes = ndimage.sum(pod, labels, range(1, count + 1))
+    largest = 1 + int(np.argmax(sizes))
+    return labels == largest
+
+
+def carve_pits(pod, protect_footprint, count, min_radius, max_radius, salt=11):
+    if count <= 0:
+        return pod
+    grass_mask = pod & ~np.pad(pod, ((0, 0), (0, 1), (0, 0)))[:, 1:, :]
+    surface = grass_mask.any(axis=1) & ~protect_footprint
+    xs, zs = np.nonzero(surface)
+    if len(xs) == 0:
+        return pod
+    pod = pod.copy()
+    for i in range(count):
+        pick = hash3(i, 0, 0, salt) % len(xs)
+        x, z = int(xs[pick]), int(zs[pick])
+        y = int(np.argmax(grass_mask[x, :, z]))
+        radius = min_radius + (hash3(i, 1, 0, salt) / 255.0) * (max_radius - min_radius)
+        r = int(math.ceil(radius))
+        x0, x1 = max(0, x - r), min(pod.shape[0], x + r + 1)
+        y0, y1 = max(0, y - r), min(pod.shape[1], y + r + 1)
+        z0, z1 = max(0, z - r), min(pod.shape[2], z + r + 1)
+        gx, gy, gz = np.mgrid[x0:x1, y0:y1, z0:z1]
+        bite = np.sqrt((gx - x) ** 2 + ((gy - y) * 1.3) ** 2 + (gz - z) ** 2) <= radius
+        bite &= ~protect_footprint[x0:x1, None, z0:z1]
+        pod[x0:x1, y0:y1, z0:z1][bite] = False
     return pod
 
 
@@ -255,6 +294,14 @@ def main():
     parser.add_argument("--max-depth", type=int)
     parser.add_argument("--roundness", type=float, default=0.0)
     parser.add_argument("--side-bulge", type=float, default=0.0)
+    parser.add_argument("--geoid-amount", type=float, default=0.0)
+    parser.add_argument("--geoid-cell", type=int, default=14)
+    parser.add_argument("--geoid-salt", type=int, default=7)
+    parser.add_argument("--pit-count", type=int, default=0)
+    parser.add_argument("--pit-min-radius", type=float, default=2.0)
+    parser.add_argument("--pit-max-radius", type=float, default=4.0)
+    parser.add_argument("--pit-protect-margin", type=int, default=3)
+    parser.add_argument("--pit-salt", type=int, default=11)
     parser.add_argument("--vine-density", type=float, default=0.0)
     parser.add_argument("--vine-length", type=int, default=3)
     parser.add_argument("--torch-density", type=float, default=0.0)
@@ -263,6 +310,11 @@ def main():
     parser.add_argument("--grass", default="minecraft:grass_block")
     parser.add_argument("--dirt", default="minecraft:dirt")
     parser.add_argument("--stone", default="minecraft:stone")
+    parser.add_argument(
+        "--no-auto-ground", action="store_true",
+        help="always use --grass, even if natural ground blocks are found at "
+             "the source footprint",
+    )
     parser.add_argument("--masks", help="optional compressed NumPy debug file")
     args = parser.parse_args()
 
@@ -297,8 +349,12 @@ def main():
         parser.error("torch max distance must be positive and rim depth non-negative")
     if not 0 < args.rounding_threshold < 1:
         parser.error("rounding threshold must be between 0 and 1")
+    if args.pit_count < 0 or args.pit_protect_margin < 0:
+        parser.error("--pit-count and --pit-protect-margin must be non-negative")
+    if args.pit_min_radius <= 0 or args.pit_max_radius < args.pit_min_radius:
+        parser.error("--pit-max-radius must be >= --pit-min-radius > 0")
 
-    ground = ground_palette(src, raw_footprint, base_y)
+    ground = None if args.no_auto_ground else ground_palette(src, raw_footprint, base_y)
 
     margin = math.ceil(
         args.top_radius + args.bulge + 2 * args.rounding + 2 * args.smoothing
@@ -314,8 +370,15 @@ def main():
     offsets = curve_offsets(depth, args.curve_amount, args.curve_angle, args.curve_twist)
     pod = build_pod(
         footprint, base_y, depth, profile, args.smoothing, offsets, args.roundness,
-        args.side_bulge,
+        args.side_bulge, args.geoid_amount, args.geoid_cell, args.geoid_salt,
     )
+    if args.pit_count > 0:
+        protect = ndimage.binary_dilation(raw_footprint, iterations=args.pit_protect_margin)
+        pod = carve_pits(
+            pod, protect, args.pit_count, args.pit_min_radius, args.pit_max_radius,
+            args.pit_salt,
+        )
+    pod = keep_largest_component(pod)
 
     pod_xz = np.argwhere(pod.any(axis=1))
     x0 = min(margin, int(pod_xz[:, 0].min()))

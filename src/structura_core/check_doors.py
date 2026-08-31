@@ -15,9 +15,7 @@ FACING_VEC = {
 }
 
 
-def check(path, steps=2):
-    s = Structure(path)
-
+def find_doors(s):
     doors = []
     for pos, idx in s.present.items():
         name = s.palette[idx]
@@ -33,6 +31,12 @@ def check(path, steps=2):
         if vec is None:
             continue
         doors.append((pos, str(props["facing"]), vec))
+    return doors
+
+
+def check(path, steps=2):
+    s = Structure(path)
+    doors = find_doors(s)
 
     print(f"found {len(doors)} door(s)\n")
 

@@ -15,7 +15,7 @@ HEIGHT = 6
 
 MATERIALS = {
     "surface": ("minecraft:stone_bricks", "minecraft:dirt_path", "minecraft:oak_fence", "minecraft:stone_bricks"),
-    "cave": ("minecraft:deepslate_bricks", "minecraft:polished_deepslate", "minecraft:iron_bars", "minecraft:deepslate_bricks"),
+    "cave": ("minecraft:mossy_cobblestone", "minecraft:polished_deepslate", "minecraft:iron_bars", "minecraft:mossy_cobblestone"),
     "sky": ("minecraft:stripped_spruce_log", "minecraft:spruce_planks", "minecraft:spruce_fence", "minecraft:stripped_spruce_log"),
     "underwater": ("minecraft:oxidized_cut_copper", "minecraft:oxidized_cut_copper", "minecraft:sea_lantern", "minecraft:glass"),
 }
