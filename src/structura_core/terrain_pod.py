@@ -28,46 +28,22 @@ def inradius_of(footprint):
     return float(ndimage.distance_transform_edt(footprint).max())
 
 
-def plinth_top(solid, base_y, high=0.85, low=0.5, window=15):
-    footprint = solid.any(axis=1)
-    area = int(footprint.sum())
-    if area == 0:
-        return base_y
-    coverage = solid.sum(axis=(0, 2)) / area
-    dipped = False
-    top = base_y
-    for y in range(base_y, min(solid.shape[1], base_y + window + 1)):
-        if coverage[y] < low:
-            dipped = True
-        elif coverage[y] >= high and dipped:
-            top = y
-            dipped = False
-    return top
-
-
 def plinth_wrap(solid, base_y, radius, geoid_amount, geoid_cell, geoid_salt, smoothing=1.5):
     shell = np.zeros_like(solid)
     if radius <= 0:
         return shell
-    top = plinth_top(solid, base_y)
-    pad = math.ceil(smoothing) if smoothing > 0 else 0
-    y0, y1 = max(0, base_y - pad), min(solid.shape[1], top + pad + 1)
+    layer = solid[:, base_y, :]
+    if not layer.any():
+        return shell
     noise = None
     if geoid_amount > 0:
         noise = patch_noise((solid.shape[0], solid.shape[2]), geoid_cell, geoid_salt) * 2.0 - 1.0
-    for y in range(base_y, top + 1):
-        layer = solid[:, y, :]
-        if not layer.any():
-            continue
-        field = signed_distance(layer)
-        threshold = radius if noise is None else radius + geoid_amount * noise
-        shell[:, y, :] = (field <= threshold) & ~layer
-    slab_solid = solid[:, y0:y1, :]
-    slab = shell[:, y0:y1, :] | slab_solid
+    field = signed_distance(layer)
+    threshold = radius if noise is None else radius + geoid_amount * noise
+    grown = (field <= threshold) | layer
     if smoothing > 0:
-        slab = ndimage.gaussian_filter(slab.astype(np.float32), sigma=smoothing) >= 0.5
-    shell[:, y0:y1, :] = slab & ~slab_solid
-    shell[:, :base_y, :] = False
+        grown = ndimage.gaussian_filter(grown.astype(np.float32), sigma=smoothing) >= 0.5
+    shell[:, base_y, :] = grown & ~layer
     return shell
 
 
