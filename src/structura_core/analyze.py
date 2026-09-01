@@ -519,6 +519,8 @@ class StructureAnalyzer:
         elongation, axis_angle = self.footprint_elongation()
         doors = self.doors()
         light_count, light_coverage = self.light_coverage()
+        debris_fraction = self.debris_fraction()
+        floating_fraction = self.floating_fraction()
         r = {
             "path": self.path,
             "size": self.size,
@@ -527,8 +529,8 @@ class StructureAnalyzer:
             "density": round(self.density(), 4),
             "components": len(comps),
             "main_component_size": len(comps[0]) if comps else 0,
-            "debris_fraction": round(self.debris_fraction(), 4),
-            "floating_fraction": round(self.floating_fraction(), 4),
+            "debris_fraction": round(debris_fraction, 4),
+            "floating_fraction": round(floating_fraction, 4),
             "palette_entropy_bits": round(self.palette_entropy(), 3),
             "compression_ratio": round(self.compression_ratio(), 4),
             "mirror_symmetry_x": round(self.mirror_symmetry("x"), 3),
@@ -547,21 +549,21 @@ class StructureAnalyzer:
             "doors": doors,
             "light_source_count": light_count,
             "light_coverage": light_coverage,
-            "warnings": self._warnings(comps),
+            "warnings": self._warnings(comps, debris_fraction, floating_fraction),
         }
         r["summary"] = self.summary_line(r)
         return r
 
-    def _warnings(self, comps):
+    def _warnings(self, comps, debris_fraction, floating_fraction):
         warnings = []
-        if self.debris_fraction() > 0.005:
+        if debris_fraction > 0.005:
             warnings.append(
                 f"debris: {len(comps)-1} disconnected component(s), "
-                f"{self.debris_fraction()*100:.1f}% of blocks -- consider dropping"
+                f"{debris_fraction*100:.1f}% of blocks -- consider dropping"
             )
-        if self.floating_fraction() > 0.02:
+        if floating_fraction > 0.02:
             warnings.append(
-                f"floating: {self.floating_fraction()*100:.1f}% of blocks have no "
+                f"floating: {floating_fraction*100:.1f}% of blocks have no "
                 f"support chain to the floor plane -- check for a detached wing"
             )
         if self.density() < 0.02:
