@@ -28,6 +28,58 @@ def inradius_of(footprint):
     return float(ndimage.distance_transform_edt(footprint).max())
 
 
+def plinth_top(solid, base_y, high=0.85, low=0.5, window=15):
+    footprint = solid.any(axis=1)
+    area = int(footprint.sum())
+    if area == 0:
+        return base_y
+    coverage = solid.sum(axis=(0, 2)) / area
+    dipped = False
+    top = base_y
+    for y in range(base_y, min(solid.shape[1], base_y + window + 1)):
+        if coverage[y] < low:
+            dipped = True
+        elif coverage[y] >= high and dipped:
+            top = y
+            dipped = False
+    return top
+
+
+def plinth_wrap(solid, base_y, radius, geoid_amount, geoid_cell, geoid_salt, smoothing=1.5):
+    shell = np.zeros_like(solid)
+    if radius <= 0:
+        return shell
+    top = plinth_top(solid, base_y)
+    pad = math.ceil(smoothing) if smoothing > 0 else 0
+    y0, y1 = max(0, base_y - pad), min(solid.shape[1], top + pad + 1)
+    noise = None
+    if geoid_amount > 0:
+        noise = patch_noise((solid.shape[0], solid.shape[2]), geoid_cell, geoid_salt) * 2.0 - 1.0
+    for y in range(base_y, top + 1):
+        layer = solid[:, y, :]
+        if not layer.any():
+            continue
+        field = signed_distance(layer)
+        threshold = radius if noise is None else radius + geoid_amount * noise
+        shell[:, y, :] = (field <= threshold) & ~layer
+    slab_solid = solid[:, y0:y1, :]
+    slab = shell[:, y0:y1, :] | slab_solid
+    if smoothing > 0:
+        slab = ndimage.gaussian_filter(slab.astype(np.float32), sigma=smoothing) >= 0.5
+    shell[:, y0:y1, :] = slab & ~slab_solid
+    shell[:, :base_y, :] = False
+    return shell
+
+
+def plinth_wrap_blocks(shell, dirt, stone, soil_depth, y_offset=0):
+    if not shell.any():
+        return
+    surface_dist = ndimage.distance_transform_edt(shell)
+    for x, y, z in np.argwhere(shell):
+        material = dirt if surface_dist[x, y, z] <= soil_depth else stone
+        yield (int(x), int(y) + y_offset, int(z)), material
+
+
 def smootherstep(edge0, edge1, x):
     t = np.clip((x - edge0) / (edge1 - edge0), 0.0, 1.0)
     return t * t * t * (t * (t * 6 - 15) + 10)
@@ -336,6 +388,16 @@ def main():
              "own footprint IS the building footprint, so that masking "
              "would wipe out nearly the entire visible surface",
     )
+    parser.add_argument(
+        "--wrap-radius", type=float, default=0.0,
+        help="grow an organic dirt/stone shell around any authored plinth "
+             "standing above base_y (a raised stone platform, steps -- "
+             "the kind of thing that would otherwise poke past the "
+             "rounded pod with flat, square sides). 0 disables it. Only "
+             "adds into air -- never overwrites retained solid, so a "
+             "cellar inside the plinth is untouched",
+    )
+    parser.add_argument("--wrap-smoothing", type=float, default=1.5)
     parser.add_argument("--masks", help="optional compressed NumPy debug file")
     args = parser.parse_args()
 
@@ -383,8 +445,13 @@ def main():
 
     margin = math.ceil(
         args.top_radius + args.bulge + 2 * args.rounding + 2 * args.smoothing
-        + args.curve_amount + args.side_bulge + args.geoid_amount
+        + args.curve_amount + args.side_bulge + args.geoid_amount + args.wrap_radius
     ) + 2
+    plinth_shell = plinth_wrap(
+        masks["solid"], base_y, args.wrap_radius,
+        args.geoid_amount, args.geoid_cell, args.geoid_salt, args.wrap_smoothing,
+    )
+    plinth_shell = np.pad(plinth_shell, ((margin, margin), (0, 0), (margin, margin)))
     raw_footprint = np.pad(raw_footprint, margin)
     footprint = rounded_footprint(
         raw_footprint, args.rounding, args.rounding_threshold,
@@ -413,6 +480,7 @@ def main():
     pod = pod[x0:x1 + 1, :, z0:z1 + 1]
     footprint = footprint[x0:x1 + 1, z0:z1 + 1]
     raw_footprint = raw_footprint[x0:x1 + 1, z0:z1 + 1]
+    plinth_shell = plinth_shell[x0:x1 + 1, :, z0:z1 + 1]
 
     shift = (margin - x0, depth, margin - z0)
     size = (pod.shape[0], src.size[1] + depth, pod.shape[2])
@@ -431,6 +499,9 @@ def main():
             pod_torch_blocks(
                 pod, raw_footprint, args.torch_density, args.torch_max_distance,
                 args.torch_rim_depth,
+            ),
+            plinth_wrap_blocks(
+                plinth_shell, args.dirt, args.stone, args.soil_depth, depth,
             ),
         ),
     )
