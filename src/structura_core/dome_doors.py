@@ -31,7 +31,7 @@ def is_solid(src, pos):
     return index is not None and src.palette[index] not in AIR_NAMES
 
 
-def is_framed(src, door_pos, perp):
+def frame_positions(door_pos, perp):
     up = tuple(v + (1 if i == 1 else 0) for i, v in enumerate(door_pos))
     sill = tuple(v - (1 if i == 1 else 0) for i, v in enumerate(door_pos))
     sides = []
@@ -39,38 +39,22 @@ def is_framed(src, door_pos, perp):
         for d in (-1, 1):
             side = list(level)
             side[perp] += d
-            sides.append(side)
-    return all(is_solid(src, p) for p in (door_pos, up, sill, *sides))
+            sides.append(tuple(side))
+    return up, sill, sides
 
 
-def find_framed_wall(src, anchor, axis, sign, size):
-    """The dome's shell curves, so a straight ray from a fixed center can
-    hit a 1-thick spot with no glass directly above or beside it -- a door
-    cut there has no visible frame and the space above it isn't sealed.
-    Search a small window around the anchor (height first, then sideways)
-    for a spot where the shell is a solid 2-tall, sided-in block, matching
-    what a real doorway needs, instead of patching gaps in afterwards."""
-    perp = 2 - axis
-    best = None
+def find_wall_at_base(src, anchor, axis, sign, size, perp):
     for radius in range(FRAME_SEARCH_RADIUS + 1):
-        for dy in range(0, radius + 1):
-            for dp in range(-radius, radius + 1):
-                if max(dy, abs(dp)) != radius:
-                    continue
-                candidate = list(anchor)
-                candidate[1] += dy
-                candidate[perp] += dp
-                if not 0 <= candidate[1] < size[1] or not 0 <= candidate[perp] < size[perp]:
-                    continue
-                wall = find_wall(src, candidate, axis, sign, size)
-                door_pos = list(candidate)
-                door_pos[axis] = wall - sign
-                door_pos = tuple(door_pos)
-                if best is None:
-                    best = door_pos
-                if is_framed(src, door_pos, perp):
-                    return door_pos, True
-    return best, False
+        for dp in ({0} if radius == 0 else {-radius, radius}):
+            candidate = list(anchor)
+            candidate[perp] += dp
+            if not 0 <= candidate[perp] < size[perp]:
+                continue
+            wall = find_wall(src, candidate, axis, sign, size)
+            door_pos = list(candidate)
+            door_pos[axis] = wall - sign
+            return tuple(door_pos)
+    return tuple(anchor)
 
 
 def door_state(facing):
@@ -131,13 +115,19 @@ def main():
     doors = []
     for facing in directions:
         axis, sign = AXIS[facing]
-        door_pos, framed = find_framed_wall(src, center, axis, sign, size)
-        if not framed:
-            print(f"WARNING: no framed spot found for {facing}, using nearest ray hit {door_pos}", file=sys.stderr)
+        perp = 2 - axis
+        door_pos = find_wall_at_base(src, center, axis, sign, size, perp)
+        upper_pos, sill, sides = frame_positions(door_pos, perp)
+        patched = 0
+        for pos in (sill, *sides):
+            if not all(0 <= v < limit for v, limit in zip(pos, size)):
+                continue
+            if not is_solid(src, pos):
+                replacements.append((pos, "minecraft:glass"))
+                patched += 1
+        if patched:
+            print(f"forced glass frame around {facing} door: {patched} block(s)", file=sys.stderr)
         lower, upper = door_state(facing)
-        upper_pos = tuple(
-            v + (1 if i == 1 else 0) for i, v in enumerate(door_pos)
-        )
         replacements.append((door_pos, lower))
         replacements.append((upper_pos, upper))
         doors.append((door_pos, facing))
