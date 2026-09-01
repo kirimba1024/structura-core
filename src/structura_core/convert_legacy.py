@@ -48,6 +48,82 @@ def block_to_state_compound(block):
     return comp
 
 
+_PANE_BAR_DIRS = {
+    "east": (1, 0, 0), "west": (-1, 0, 0),
+    "north": (0, 0, -1), "south": (0, 0, 1),
+}
+
+_NON_CONNECTING_NEIGHBORS = {
+    "sign", "wall_sign", "hanging_sign", "wall_hanging_sign",
+    "torch", "wall_torch", "soul_torch", "soul_wall_torch",
+    "redstone_torch", "redstone_wall_torch",
+    "banner", "wall_banner", "ladder", "lever", "button",
+    "pressure_plate", "carpet", "rail", "powered_rail",
+    "detector_rail", "activator_rail", "tripwire", "tripwire_hook",
+    "trapdoor", "door", "slab", "stairs", "bed", "flower_pot",
+    "campfire", "lantern", "skull", "head",
+}
+
+
+def _is_connectable_neighbor(name):
+    short = name.split(":", 1)[-1]
+    if short in ("air", "cave_air", "void_air"):
+        return False
+    if short.endswith("_pane") or short.endswith("_bars"):
+        return True
+    return not any(
+        short == kw or short.endswith(f"_{kw}") for kw in _NON_CONNECTING_NEIGHBORS
+    )
+
+
+def _fix_pane_bar_connections(blocks, palette_list, palette_index):
+    pos_to_idx = {pos: idx for pos, idx, _ in blocks}
+    fixes = {}
+    for i, (pos, idx, _) in enumerate(blocks):
+        name = str(palette_list[idx]["Name"])
+        short = name.split(":", 1)[-1]
+        if not (short.endswith("_pane") or short.endswith("_bars")):
+            continue
+        props = palette_list[idx].get("Properties")
+        if props is None:
+            continue
+        changed = {}
+        for direction, (dx, dy, dz) in _PANE_BAR_DIRS.items():
+            if direction not in props:
+                continue
+            npos = (pos[0] + dx, pos[1] + dy, pos[2] + dz)
+            nidx = pos_to_idx.get(npos)
+            nname = str(palette_list[nidx]["Name"]) if nidx is not None else "minecraft:air"
+            want = "true" if _is_connectable_neighbor(nname) else "false"
+            if str(props[direction]) != want:
+                changed[direction] = want
+        if changed:
+            fixes[i] = changed
+    if not fixes:
+        return blocks, 0
+    new_blocks = list(blocks)
+    for i, changed in fixes.items():
+        pos, idx, entry_nbt = blocks[i]
+        old_props = palette_list[idx]["Properties"]
+        new_props = CompoundTag({k: v for k, v in old_props.items()})
+        for direction, want in changed.items():
+            new_props[direction] = StringTag(want)
+        name = palette_list[idx]["Name"]
+        state_key = f"{name}[" + ",".join(
+            f"{k}={v}" for k, v in sorted((k, str(v)) for k, v in new_props.items())
+        ) + "]"
+        new_idx = palette_index.get(state_key)
+        if new_idx is None:
+            new_idx = len(palette_list)
+            palette_index[state_key] = new_idx
+            comp = CompoundTag()
+            comp["Name"] = name
+            comp["Properties"] = new_props
+            palette_list.append(comp)
+        new_blocks[i] = (pos, new_idx, entry_nbt)
+    return new_blocks, len(fixes)
+
+
 def _split_exterior_interior_air(air_positions, solid_positions, size_x, size_y, size_z):
     """Classify each air cell as "exterior" (open padding -- omit, so it
     doesn't carve craters into destination terrain) or "interior" (a real
@@ -241,6 +317,10 @@ def convert(
         # enclosed pockets -- real rooms) is placed explicitly so those
         # rooms get hollowed out even when the piece lands partway inside a
         # hill and would otherwise show raw terrain poking through.
+        blocks, pane_fixes = _fix_pane_bar_connections(blocks, palette_list, palette_index)
+        if pane_fixes:
+            print(f"    pane/bars connection fixes: {pane_fixes}")
+
         solid_positions = {pos for pos, _, _ in blocks}
         exterior_air, interior_air = _split_exterior_interior_air(
             air_positions, solid_positions, size_x, size_y, size_z
