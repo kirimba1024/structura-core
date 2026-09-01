@@ -14,7 +14,7 @@ import json
 import math
 import struct
 import zlib
-from collections import Counter, deque
+from collections import Counter
 
 import numpy as np
 
@@ -50,6 +50,8 @@ class StructureAnalyzer:
                                if s.palette[idx] in AIR_NAMES}
         self._components = None  # cached
         self._rooms = None  # cached
+        self._label_cache = None  # cached: (labels, local_positions, count, sizes)
+        self._state_grid_cache = None  # cached
 
     # ---- A. geometry / integrity -----------------------------------
 
@@ -69,39 +71,47 @@ class StructureAnalyzer:
         """
         return len(self.positions) / self.bbox_volume()
 
-    def connected_components(self):
-        """26-connected flood fill over non-air cells.
+    def _label_solid(self):
+        """26-connected component labeling of self.positions, vectorized
+        (scipy.ndimage.label -- the same primitive largest_component.py
+        already uses for this exact task) and cached. Backs both
+        connected_components() and floating_fraction(), which used to
+        each run their own pure-Python BFS -- correct, but a dict/deque
+        walk with 26 neighbor checks per cell doesn't scale, and visibly
+        struggled (60+s) on the largest pieces in the archive. Returns
+        (labels, local_positions, count, sizes): labels is label-per-cell
+        in a local (offset-cropped) array, local_positions is
+        self.positions' keys in that same local coordinate space and
+        order, sizes[label] is that component's block count (sizes[0] is
+        unlabeled background, unused)."""
+        if self._label_cache is not None:
+            return self._label_cache
+        from scipy import ndimage
 
-        Standard connected-component labeling, the same algorithm used to
-        strip the lapis-lazuli debris earlier in this session. Returns
-        components sorted largest-first.
-        """
+        if not self.positions:
+            self._label_cache = (None, np.zeros((0, 3), dtype=np.int32), 0, np.array([0]))
+            return self._label_cache
+        positions = np.array(list(self.positions.keys()), dtype=np.int32)
+        offset = positions.min(axis=0)
+        local = positions - offset
+        mask = np.zeros(tuple(local.max(axis=0) + 1), dtype=bool)
+        mask[tuple(local.T)] = True
+        labels, count = ndimage.label(mask, structure=ndimage.generate_binary_structure(3, 3))
+        sizes = np.bincount(labels.ravel())
+        self._label_cache = (labels, local, count, sizes)
+        return self._label_cache
+
+    def connected_components(self):
+        """26-connected flood fill over non-air cells, sizes only (every
+        caller here only ever needs len(component), never its contents)
+        sorted largest-first. Each "component" is a range(size) so
+        len(comps[0]) etc. keep working exactly as before."""
         if self._components is not None:
             return self._components
-        visited = set()
-        components = []
-        for start in self.positions:
-            if start in visited:
-                continue
-            comp = []
-            q = deque([start])
-            visited.add(start)
-            while q:
-                x, y, z = q.popleft()
-                comp.append((x, y, z))
-                for dx in (-1, 0, 1):
-                    for dy in (-1, 0, 1):
-                        for dz in (-1, 0, 1):
-                            if dx == dy == dz == 0:
-                                continue
-                            np_ = (x + dx, y + dy, z + dz)
-                            if np_ in self.positions and np_ not in visited:
-                                visited.add(np_)
-                                q.append(np_)
-            components.append(comp)
-        components.sort(key=len, reverse=True)
-        self._components = components
-        return components
+        _, _, count, sizes = self._label_solid()
+        comp_sizes = sorted((int(sizes[i]) for i in range(1, count + 1)), reverse=True)
+        self._components = [range(s) for s in comp_sizes]
+        return self._components
 
     def debris_fraction(self) -> float:
         """Fraction of blocks NOT in the largest connected component."""
@@ -122,33 +132,23 @@ class StructureAnalyzer:
         gravity constraints in block-building tools/games. Anything not
         reachable that way is floating debris or a disconnected floating
         wing -- both worth flagging before this piece goes in the library.
+
+        Support propagation and connected-component membership are the
+        same relation here (26-connectivity, no directionality) -- a
+        component is entirely grounded the moment any one of its cells
+        touches the min-Y plane, since the flood fill would reach the
+        rest of that component regardless of which cell it started from.
+        So: reuse _label_solid()'s labeling, just check which labels
+        appear at min-Y instead of walking a queue by hand.
         """
         if not self.positions:
             return 0.0
-        min_y = min(p[1] for p in self.positions)
-        grounded = set()
-        q = deque()
-        for pos in self.positions:
-            if pos[1] == min_y:
-                grounded.add(pos)
-                q.append(pos)
-        while q:
-            x, y, z = q.popleft()
-            # support propagates sideways along the same row and upward
-            # onto a supported block (i.e. this is a "resting on or
-            # attached to something already grounded" flood fill, not
-            # strict straight-down gravity -- a wall attached to a
-            # grounded floor counts as grounded).
-            for dx in (-1, 0, 1):
-                for dy in (-1, 0, 1):
-                    for dz in (-1, 0, 1):
-                        if dx == dy == dz == 0:
-                            continue
-                        np_ = (x + dx, y + dy, z + dz)
-                        if np_ in self.positions and np_ not in grounded:
-                            grounded.add(np_)
-                            q.append(np_)
-        return 1 - len(grounded) / len(self.positions)
+        labels, local, count, sizes = self._label_solid()
+        min_y_local = int(local[:, 1].min())
+        touching = set(labels[tuple(local[local[:, 1] == min_y_local].T)].tolist())
+        touching.discard(0)
+        grounded = sum(int(sizes[label]) for label in touching)
+        return 1 - grounded / len(self.positions)
 
     # ---- B. material diversity --------------------------------------
 
@@ -196,6 +196,19 @@ class StructureAnalyzer:
 
     # ---- D. symmetry -----------------------------------------------
 
+    def _state_grid(self):
+        """self.size-shaped array of palette index, -1 where there's no
+        block. Cached; backs mirror_symmetry (called twice, once per axis)."""
+        if self._state_grid_cache is not None:
+            return self._state_grid_cache
+        grid = np.full(self.size, -1, dtype=np.int32)
+        if self.positions:
+            positions = np.array(list(self.positions.keys()), dtype=np.int32)
+            indices = np.array(list(self.positions.values()), dtype=np.int32)
+            grid[tuple(positions.T)] = indices
+        self._state_grid_cache = grid
+        return grid
+
     def mirror_symmetry(self, axis: str = "x") -> float:
         """Fraction of blocks whose mirrored position (same axis, across
         the piece's own centerline) also has a block of the same type.
@@ -203,18 +216,18 @@ class StructureAnalyzer:
         Standard mirror-symmetry scoring, the same comparison-to-transformed
         -copy principle used to score symmetry error in voxel/3D generation
         work (e.g. SymTRELLIS). 1.0 = perfectly symmetric on that axis.
+
+        Vectorized: flipping the whole state grid along one axis is
+        exactly the per-block "look up the mirrored position" the
+        original pure-Python version did one dict access at a time.
         """
-        sx, sy, sz = self.size
+        if not self.positions:
+            return 0.0
         axis_i = {"x": 0, "y": 1, "z": 2}[axis]
-        dim = self.size[axis_i]
-        match = 0
-        for pos, state in self.positions.items():
-            mirrored = list(pos)
-            mirrored[axis_i] = dim - 1 - pos[axis_i]
-            mirrored = tuple(mirrored)
-            if self.positions.get(mirrored) == state:
-                match += 1
-        return match / len(self.positions) if self.positions else 0.0
+        grid = self._state_grid()
+        mirrored = np.flip(grid, axis=axis_i)
+        match = int(np.sum((grid == mirrored) & (grid != -1)))
+        return match / len(self.positions)
 
     # ---- E. terrain-capture heuristic (domain-specific, not academic) --
 
