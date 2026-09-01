@@ -29,7 +29,10 @@ def inradius_of(footprint):
     return float(ndimage.distance_transform_edt(footprint).max())
 
 
-def plinth_wrap(solid, interior_air, base_y, radius, geoid_amount, geoid_cell, geoid_salt, smoothing=1.5):
+def plinth_wrap(
+    solid, interior_air, base_y, radius, geoid_amount, geoid_cell, geoid_salt,
+    smoothing=1.5, offsets=None,
+):
     shell = np.zeros_like(solid)
     if radius <= 0:
         return shell
@@ -42,6 +45,12 @@ def plinth_wrap(solid, interior_air, base_y, radius, geoid_amount, geoid_cell, g
             continue
         field = signed_distance(layer)
         threshold = radius if noise is None else radius + geoid_amount * noise
+        if offsets is not None:
+            dx, dz = offsets[min(len(offsets) - 1, max(0, base_y - 1 - y))]
+            if dx or dz:
+                field = ndimage.shift(
+                    field, (-dx, -dz), order=1, mode="constant", cval=field.max() + 1,
+                )
         grown = (field <= threshold) | layer
         if smoothing > 0:
             grown = ndimage.gaussian_filter(grown.astype(np.float32), sigma=smoothing) >= 0.5
@@ -430,12 +439,6 @@ def main():
         args.top_radius + args.bulge + 2 * args.rounding + 2 * args.smoothing
         + args.curve_amount + args.side_bulge + args.geoid_amount + args.wrap_radius
     ) + 2
-    plinth_shell = plinth_wrap(
-        masks["solid"], masks["interior_air"], base_y, args.wrap_radius,
-        args.geoid_amount, args.geoid_cell, args.geoid_salt, args.wrap_smoothing,
-    )
-    plinth_shell = np.pad(plinth_shell, ((margin, margin), (0, 0), (margin, margin)))
-    plinth_solid = np.pad(masks["solid"], ((margin, margin), (0, 0), (margin, margin)))
     raw_footprint = np.pad(raw_footprint, margin)
     footprint = rounded_footprint(
         raw_footprint, args.rounding, args.rounding_threshold,
@@ -444,6 +447,12 @@ def main():
     depth = pod_depth(inradius, args.top_radius, args.bulge, args.max_depth)
     profile = radius_profile(inradius, args.top_radius, args.bulge, depth)
     offsets = curve_offsets(depth, args.curve_amount, args.curve_angle, args.curve_twist)
+    plinth_shell = plinth_wrap(
+        masks["solid"], masks["interior_air"], base_y, args.wrap_radius,
+        args.geoid_amount, args.geoid_cell, args.geoid_salt, args.wrap_smoothing, offsets,
+    )
+    plinth_shell = np.pad(plinth_shell, ((margin, margin), (0, 0), (margin, margin)))
+    plinth_solid = np.pad(masks["solid"], ((margin, margin), (0, 0), (margin, margin)))
     pod = build_pod(
         footprint, base_y, depth, profile, args.smoothing, offsets, args.roundness,
         args.side_bulge, args.geoid_amount, args.geoid_cell, args.geoid_salt,
