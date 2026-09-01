@@ -16,7 +16,20 @@ import struct
 import zlib
 from collections import Counter, deque
 
+import numpy as np
+
 from .nbt import AIR_NAMES, Structure
+
+
+def _sparkline(counts, y0, y1, width=40):
+    span = y1 - y0 + 1
+    buckets = [0] * min(width, span)
+    for y, n in counts.items():
+        i = min(len(buckets) - 1, (y - y0) * len(buckets) // span)
+        buckets[i] += n
+    peak = max(buckets) or 1
+    ramp = " ▁▂▃▄▅▆▇█"
+    return "".join(ramp[round(b / peak * (len(ramp) - 1))] for b in buckets)
 
 # Some pieces omit air entirely (legacy conversion), others list it
 # explicitly (hand-authored jigsaw pieces, to carve into terrain).
@@ -226,6 +239,28 @@ class StructureAnalyzer:
         natural = sum(n for name, n in hist.items() if name in self._NATURAL_BLOCKS)
         return natural / total
 
+    def terrain_profile(self):
+        """Y-range and per-layer density of the natural-terrain material
+        already in this piece (captured hill, authored yard mound, ...).
+        natural_terrain_fraction is one ratio for the whole piece; this is
+        where it sits and how it's distributed -- a thin scattered dusting
+        reads very differently from one dense captured mass, same overall
+        fraction."""
+        natural_ys = [
+            pos[1] for pos, idx in self.positions.items()
+            if self.palette[idx] in self._NATURAL_BLOCKS
+        ]
+        if not natural_ys:
+            return None
+        y0, y1 = min(natural_ys), max(natural_ys)
+        return {
+            "min_y": y0,
+            "max_y": y1,
+            "span": y1 - y0 + 1,
+            "block_count": len(natural_ys),
+            "density_profile": _sparkline(Counter(natural_ys), y0, y1),
+        }
+
     # ---- F. rooms / silhouette -- numeric stand-ins for "look at a
     #  picture", not academic citations, but each built on the same
     #  primitives (connected-component labeling, PCA) used elsewhere in
@@ -247,7 +282,6 @@ class StructureAnalyzer:
         if not self.air_positions:
             self._rooms = []
             return self._rooms
-        import numpy as np
         from scipy import ndimage
 
         positions = np.asarray(list(self.air_positions), dtype=np.int32)
@@ -268,8 +302,6 @@ class StructureAnalyzer:
         (diagonal roof detail, or a captured/rotated selection)."""
         if len(self.positions) < 2:
             return 1.0, 0.0
-        import numpy as np
-
         pts = np.array([(p[0], p[2]) for p in self.positions], dtype=float)
         pts -= pts.mean(axis=0)
         cov = np.cov(pts.T)
@@ -287,16 +319,70 @@ class StructureAnalyzer:
         if not self.positions:
             return ""
         ys = [p[1] for p in self.positions]
-        counts = Counter(ys)
+        return _sparkline(Counter(ys), min(ys), max(ys), width)
+
+    def floor_count(self) -> int:
+        """Distinct horizontal density peaks in the Y-profile. A floor
+        plate (floor planking, or the ceiling below the next room up)
+        is a near-full-footprint slab, so it shows up as a local peak in
+        blocks-per-Y separated by lower-density room-interior layers.
+        scipy.signal.find_peaks is the standard 1D peak-detection
+        primitive; a 15%-of-max prominence floor keeps window-band or
+        trim ripples from counting as extra floors. Heuristic, not exact
+        -- an open-plan atrium or a dome throws it off."""
+        if not self.positions:
+            return 0
+        from scipy.signal import find_peaks
+
+        ys = [p[1] for p in self.positions]
         y0, y1 = min(ys), max(ys)
-        span = y1 - y0 + 1
-        buckets = [0] * min(width, span)
-        for y, n in counts.items():
-            i = min(len(buckets) - 1, (y - y0) * len(buckets) // span)
-            buckets[i] += n
-        peak = max(buckets) or 1
-        ramp = " ▁▂▃▄▅▆▇█"
-        return "".join(ramp[round(b / peak * (len(ramp) - 1))] for b in buckets)
+        if y1 == y0:
+            return 1
+        counts = np.zeros(y1 - y0 + 1)
+        for y, n in Counter(ys).items():
+            counts[y - y0] = n
+        peaks, _ = find_peaks(counts, prominence=counts.max() * 0.15, distance=2)
+        return max(1, len(peaks))
+
+    # ---- G. environment fit -- material-palette voting, the same
+    #  technique natural_terrain_fraction already uses, just against
+    #  different curated block sets. A guess to narrow human/AI attention,
+    #  not a verdict -- e.g. this is the kind of signal that could have
+    #  flagged davegr_house_cave's mismatch (heavy glass/wood, low stone)
+    #  ahead of the live in-game rejection recorded in its notes. --------
+
+    _WATER_BLOCKS = {
+        "minecraft:prismarine", "minecraft:prismarine_bricks",
+        "minecraft:dark_prismarine", "minecraft:sea_lantern",
+        "minecraft:kelp", "minecraft:kelp_plant", "minecraft:conduit",
+        "minecraft:tube_coral_block", "minecraft:brain_coral_block",
+        "minecraft:sponge", "minecraft:wet_sponge",
+    }
+    _NETHER_BLOCKS = {
+        "minecraft:netherrack", "minecraft:nether_bricks", "minecraft:blackstone",
+        "minecraft:basalt", "minecraft:soul_sand", "minecraft:soul_soil",
+        "minecraft:glowstone", "minecraft:magma_block", "minecraft:crimson_planks",
+        "minecraft:warped_planks", "minecraft:nether_wart_block", "minecraft:shroomlight",
+    }
+
+    def environment_fit(self) -> dict:
+        hist = self.block_histogram()
+        total = sum(hist.values()) or 1
+        water = sum(n for name, n in hist.items() if name in self._WATER_BLOCKS) / total
+        nether = sum(n for name, n in hist.items() if name in self._NETHER_BLOCKS) / total
+        glass = sum(n for name, n in hist.items() if "glass" in name) / total
+        stone_family = sum(
+            n for name, n in hist.items()
+            if "stone" in name or "cobble" in name or "brick" in name
+        ) / total
+        return {
+            "water_material_fraction": round(water, 4),
+            "nether_material_fraction": round(nether, 4),
+            "glass_fraction": round(glass, 4),
+            "stone_family_fraction": round(stone_family, 4),
+            "has_own_ground": self.natural_terrain_fraction() > 0.15,
+            "cave_friendly_guess": stone_family > 0.5 and glass < 0.05,
+        }
 
     # ---- report -------------------------------------------------------
 
@@ -323,7 +409,10 @@ class StructureAnalyzer:
             "room_sizes": rooms[:8],
             "footprint_elongation": round(elongation, 2),
             "footprint_axis_deg": axis_angle,
+            "floor_count": self.floor_count(),
             "vertical_profile": self.vertical_profile(),
+            "terrain_profile": self.terrain_profile(),
+            "environment_fit": self.environment_fit(),
             "warnings": self._warnings(comps),
         }
 
