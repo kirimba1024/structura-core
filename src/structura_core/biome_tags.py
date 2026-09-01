@@ -27,6 +27,12 @@ OCEAN = [
     "minecraft:frozen_ocean", "minecraft:deep_frozen_ocean",
 ]
 
+NETHER = [
+    "minecraft:nether_wastes", "minecraft:soul_sand_valley",
+    "minecraft:crimson_forest", "minecraft:warped_forest",
+    "minecraft:basalt_deltas",
+]
+
 SKY_ANYWHERE = ["#structura:surface_land", "#structura:ocean"]
 
 
@@ -46,6 +52,7 @@ def main():
 
     write_tag(args.data_root, "surface_land", SURFACE_LAND)
     write_tag(args.data_root, "ocean", OCEAN)
+    write_tag(args.data_root, "nether", NETHER)
     write_tag(args.data_root, "sky_anywhere", SKY_ANYWHERE)
 
 
