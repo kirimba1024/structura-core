@@ -38,19 +38,62 @@ def compute_masks(solid, envelope_radius, aura_radius, cavern_radius, base_y):
     return envelope, surface, interior_air, aura, cavern_aura
 
 
+GROUND_MARKERS = frozenset({
+    "minecraft:grass_block", "minecraft:dirt_path", "minecraft:coarse_dirt",
+    "minecraft:farmland", "minecraft:podzol", "minecraft:mycelium",
+    "minecraft:sand", "minecraft:red_sand", "minecraft:gravel",
+    "minecraft:snow_block",
+})
+
+
+def _topmost_per_column(src, keep):
+    by_column = {}
+    for (x, y, z), index in src.present.items():
+        if not keep(src.palette[index]):
+            continue
+        col = (x, z)
+        if col not in by_column or y > by_column[col]:
+            by_column[col] = y
+    return by_column
+
+
+def _bottommost_per_column(src, keep):
+    by_column = {}
+    for (x, y, z), index in src.present.items():
+        if not keep(src.palette[index]):
+            continue
+        col = (x, z)
+        if col not in by_column or y < by_column[col]:
+            by_column[col] = y
+    return by_column
+
+
 def detect_base_y(src, solid, margin):
-    """The lowest Y with any solid block can be pulled down by an outlier
-    (a doorstep, a lamp-post foundation, a single low decoration) below the
-    building's real floor/yard level. minecraft:grass_block marks that
-    real level directly -- use the Y with the most of it, falling back to
-    the old any-solid rule only when the source has no grass at all."""
-    counts = {}
-    for (_x, y, _z), index in src.present.items():
-        if src.palette[index] == "minecraft:grass_block":
-            counts[y] = counts.get(y, 0) + 1
-    if counts:
-        return max(counts, key=counts.get) + margin
-    return int(np.flatnonzero(solid.any(axis=(0, 2)))[0])
+    """The structure's own ground/yard level, as one Y. Everything below
+    it counts as "already underground": aura/cavern_aura stop there, and
+    terrain_pod's pod sits below it with its own top layer picking up
+    right where this leaves off -- getting this Y right is what makes the
+    pod blend instead of either burying the porch or leaving a gap.
+
+    The lowest solid block anywhere is NOT that level: a doorstep, a
+    lamp-post foundation, or a single low decoration pulls it down below
+    the building's real floor. Per-column, then median across columns, so
+    a handful of outlier columns (a planter, one terraced step, a
+    captured slope) can't skew the result the way either a single global
+    min or a raw block-count mode can:
+
+    1. Preferred: GROUND_MARKERS -- the material builders actually walk
+       on (grass/path/farmland/sand/snow/...), not walls. Topmost marker
+       per (x, z) column, median Y across every column that has one.
+    2. Fallback, only when the build has none of those (all-stone, or an
+       interior-only cutaway): lowest solid block per column, same median.
+    """
+    by_column = _topmost_per_column(src, lambda name: name in GROUND_MARKERS)
+    if not by_column:
+        by_column = _bottommost_per_column(src, lambda name: name not in AIR_NAMES)
+    if not by_column:
+        return int(np.flatnonzero(solid.any(axis=(0, 2)))[0])
+    return int(round(float(np.median(list(by_column.values()))))) + margin
 
 
 def adaptive_cavern_radius(solid, minimum=3.0, maximum=6.5):
