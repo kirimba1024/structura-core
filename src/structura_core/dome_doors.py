@@ -87,7 +87,7 @@ def auto_center(pod_masks):
     masks = np.load(pod_masks)
     base_y = int(masks["base_y"])
     footprint = masks["raw_footprint"]
-    zs, xs = np.nonzero(footprint)
+    xs, zs = np.nonzero(footprint)
     return int(round(xs.mean())), base_y, int(round(zs.mean()))
 
 
