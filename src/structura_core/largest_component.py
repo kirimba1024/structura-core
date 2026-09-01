@@ -47,13 +47,22 @@ def drop_tiny_components(blocks, max_size):
     component (including a legitimate second wing) untouched. A fragment
     this small -- a stray leaf, a lone vine block, a single misplaced
     stone -- is confidently noise rather than an artistic choice, unlike
-    a whole detached structure, so this is safe to auto-apply."""
+    a whole detached structure, so this is safe to auto-apply.
+
+    The single largest component always survives regardless of its own
+    size. Without that floor, a source file fragmented enough that every
+    component is individually <= max_size (never seen in the archive so
+    far, but this runs unattended on every batch conversion with no
+    review) would empty out entirely -- this is meant to drop confident
+    noise, never the whole structure."""
     if not blocks:
         return blocks, 0
     positions, block_labels, sizes, count = _label_components(blocks)
     if count <= 1:
         return blocks, 0
+    largest = int(np.argmax(sizes[1:]) + 1)
     keep_labels = {label for label in range(1, count + 1) if sizes[label] > max_size}
+    keep_labels.add(largest)
     keep = {tuple(p) for p, label in zip(positions, block_labels) if label in keep_labels}
     filtered = [block for block in blocks if block[0] in keep]
     return filtered, len(blocks) - len(filtered)
