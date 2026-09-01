@@ -92,7 +92,14 @@ def clean_structure(src_path, dst_path, mode="largest", max_size=6, report_only=
     src.block_nbt = {
         pos: nbt for pos, nbt in src.block_nbt.items() if pos in src.present
     }
-    save_structure(src, dst_path, src.size)
+    if src.present:
+        xs, ys, zs = zip(*src.present)
+        ox, oy, oz = min(xs), min(ys), min(zs)
+        new_size = (max(xs) - ox + 1, max(ys) - oy + 1, max(zs) - oz + 1)
+    else:
+        ox, oy, oz = 0, 0, 0
+        new_size = src.size
+    save_structure(src, dst_path, new_size, shift=(-ox, -oy, -oz))
 
 
 def main():
