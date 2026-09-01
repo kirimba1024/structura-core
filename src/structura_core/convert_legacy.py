@@ -20,6 +20,18 @@ from amulet_nbt import CompoundTag, ListTag, IntTag, StringTag, NamedTag
 
 from .version import DATA_VERSION, JAVA_VERSION
 
+# Blocks that are never a deliberate material choice in a curated
+# structure -- replaced unconditionally at conversion time, every asset,
+# no per-file opt-in. bedrock: unbreakable, and its only realistic source
+# is a WorldEdit selection reaching the world floor -- not flagged for
+# review, just swapped, since any other stone would have looked the same
+# to the original builder (see structura_core.analyze.bedrock_fraction
+# and info.txt CURATION for the asset that prompted this).
+FORCED_REPLACEMENTS = {
+    ("minecraft", "bedrock"): ("minecraft", "cobblestone"),
+}
+
+
 # Target DataVersion for 1.21.1 (Java Edition release). Update if you target
 # a different patch version.
 def block_to_state_compound(block):
@@ -170,6 +182,9 @@ def convert(
                     if block.base_name == "air":
                         air_positions.add(pos)
                         continue
+                    replacement = FORCED_REPLACEMENTS.get((block.namespace, block.base_name))
+                    if replacement is not None:
+                        block = amulet.Block(*replacement)
                     if block.namespace == "universal_minecraft":
                         raise ValueError(
                             f"untranslated universal block at {(x, y, z)}: {block}"
