@@ -32,7 +32,10 @@ class StructureAnalyzer:
         self.palette = s.palette
         self.positions = {pos: idx for pos, idx in s.present.items()
                            if s.palette[idx] not in AIR_NAMES}
+        self.air_positions = {pos for pos, idx in s.present.items()
+                               if s.palette[idx] in AIR_NAMES}
         self._components = None  # cached
+        self._rooms = None  # cached
 
     # ---- A. geometry / integrity -----------------------------------
 
@@ -223,10 +226,84 @@ class StructureAnalyzer:
         natural = sum(n for name, n in hist.items() if name in self._NATURAL_BLOCKS)
         return natural / total
 
+    # ---- F. rooms / silhouette -- numeric stand-ins for "look at a
+    #  picture", not academic citations, but each built on the same
+    #  primitives (connected-component labeling, PCA) used elsewhere in
+    #  this project and confirmed as the standard approach for exactly
+    #  this via web research (2026-09-01): room segmentation from dilating
+    #  a voxel occupancy grid until doorway apertures close, then labeling
+    #  connected components, is literally how voxel indoor-map room
+    #  detection is done in robotics/reconstruction work; PCA/SVD on a
+    #  point cloud for a principal-axis oriented bounding box is the
+    #  standard cheap elongation/orientation descriptor. -----------------
+
+    def rooms(self):
+        """Explicit-air cells (already interior-only -- see convert_legacy's
+        exterior/interior split), 6-connected into individual enclosed
+        rooms. Component count/sizes describe interior complexity without
+        opening a render."""
+        if self._rooms is not None:
+            return self._rooms
+        if not self.air_positions:
+            self._rooms = []
+            return self._rooms
+        import numpy as np
+        from scipy import ndimage
+
+        positions = np.asarray(list(self.air_positions), dtype=np.int32)
+        offset = positions.min(axis=0)
+        local = positions - offset
+        mask = np.zeros(tuple(local.max(axis=0) + 1), dtype=bool)
+        mask[tuple(local.T)] = True
+        labels, count = ndimage.label(mask, structure=ndimage.generate_binary_structure(3, 1))
+        sizes = np.bincount(labels.ravel())[1:] if count else np.array([], dtype=int)
+        self._rooms = sorted(sizes.tolist(), reverse=True)
+        return self._rooms
+
+    def footprint_elongation(self):
+        """PCA on the XZ footprint of solid blocks: ratio of the major to
+        minor principal-axis spread, and that major axis's angle off the
+        X grid line. A Minecraft build is normally grid-aligned by
+        construction -- an angle far from 0/90 degrees is itself a signal
+        (diagonal roof detail, or a captured/rotated selection)."""
+        if len(self.positions) < 2:
+            return 1.0, 0.0
+        import numpy as np
+
+        pts = np.array([(p[0], p[2]) for p in self.positions], dtype=float)
+        pts -= pts.mean(axis=0)
+        cov = np.cov(pts.T)
+        eigvals, eigvecs = np.linalg.eigh(cov)
+        order = np.argsort(eigvals)[::-1]
+        eigvals = np.clip(eigvals[order], 1e-9, None)
+        major = eigvecs[:, order[0]]
+        angle = math.degrees(math.atan2(major[1], major[0])) % 90.0
+        return float(math.sqrt(eigvals[0] / eigvals[1])), round(angle, 1)
+
+    def vertical_profile(self, width: int = 40) -> str:
+        """One-line block-count-per-Y sparkline -- roof taper, multiple
+        floors, or a floating outlier layer all show up as a shape in
+        text, no render needed."""
+        if not self.positions:
+            return ""
+        ys = [p[1] for p in self.positions]
+        counts = Counter(ys)
+        y0, y1 = min(ys), max(ys)
+        span = y1 - y0 + 1
+        buckets = [0] * min(width, span)
+        for y, n in counts.items():
+            i = min(len(buckets) - 1, (y - y0) * len(buckets) // span)
+            buckets[i] += n
+        peak = max(buckets) or 1
+        ramp = " ▁▂▃▄▅▆▇█"
+        return "".join(ramp[round(b / peak * (len(ramp) - 1))] for b in buckets)
+
     # ---- report -------------------------------------------------------
 
     def report(self) -> dict:
         comps = self.connected_components()
+        rooms = self.rooms()
+        elongation, axis_angle = self.footprint_elongation()
         return {
             "path": self.path,
             "size": self.size,
@@ -242,6 +319,11 @@ class StructureAnalyzer:
             "mirror_symmetry_x": round(self.mirror_symmetry("x"), 3),
             "mirror_symmetry_z": round(self.mirror_symmetry("z"), 3),
             "natural_terrain_fraction": round(self.natural_terrain_fraction(), 4),
+            "room_count": len(rooms),
+            "room_sizes": rooms[:8],
+            "footprint_elongation": round(elongation, 2),
+            "footprint_axis_deg": axis_angle,
+            "vertical_profile": self.vertical_profile(),
             "warnings": self._warnings(comps),
         }
 
