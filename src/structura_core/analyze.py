@@ -253,6 +253,21 @@ class StructureAnalyzer:
         natural = sum(n for name, n in hist.items() if name in self._NATURAL_BLOCKS)
         return natural / total
 
+    def bedrock_fraction(self) -> float:
+        """Unlike dirt/stone/grass, bedrock is never a deliberate material
+        choice in a curated build -- its only realistic source is a
+        WorldEdit selection that reached all the way down to the world
+        floor. Found by inspecting a real rejected asset (2026-09-01,
+        [Obturonius]peakfortress -- rejected live as "ugly", turned out to
+        be 32.7% bedrock): a stronger, unambiguous version of the natural-
+        terrain heuristic above, worth its own warning rather than being
+        folded into that one fuzzier signal."""
+        hist = self.block_histogram()
+        total = sum(hist.values())
+        if not total:
+            return 0.0
+        return hist.get("minecraft:bedrock", 0) / total
+
     def terrain_profile(self):
         """Y-range and per-layer density of the natural-terrain material
         already in this piece (captured hill, authored yard mound, ...).
@@ -462,7 +477,7 @@ class StructureAnalyzer:
         ("nature", ("leaves", "grass", "dirt", "sand", "gravel", "flower", "vine",
                      "kelp", "coral", "mycelium", "podzol", "moss", "sapling",
                      "fern", "bush", "crop", "wart", "mushroom", "lily_pad")),
-        ("functional", ("chest", "furnace", "door", "torch", "lantern", "bed",
+        ("functional", ("chest", "furnace", "door", "torch", "lantern", "_bed",
                           "table", "shelf", "barrel", "smoker", "loom", "anvil",
                           "brewing", "cauldron", "hopper", "dispenser", "dropper",
                           "redstone", "lever", "button", "plate", "rail", "sign",
@@ -536,6 +551,7 @@ class StructureAnalyzer:
             "mirror_symmetry_x": round(self.mirror_symmetry("x"), 3),
             "mirror_symmetry_z": round(self.mirror_symmetry("z"), 3),
             "natural_terrain_fraction": round(self.natural_terrain_fraction(), 4),
+            "bedrock_fraction": round(self.bedrock_fraction(), 4),
             "room_count": len(rooms),
             "room_sizes": rooms[:8],
             "footprint_elongation": round(elongation, 2),
@@ -576,6 +592,13 @@ class StructureAnalyzer:
             warnings.append(
                 f"likely captured terrain: {ntf*100:.1f}% of blocks are natural "
                 f"material (dirt/grass/stone/...) -- check for an attached hill/tree"
+            )
+        bf = self.bedrock_fraction()
+        if bf > 0.001:
+            warnings.append(
+                f"bedrock: {bf*100:.1f}% of blocks -- almost never a deliberate "
+                f"material choice, near-certain sign the selection reached the "
+                f"world floor (see [Obturonius]peakfortress, rejected live at 32.7%)"
             )
         return warnings
 
