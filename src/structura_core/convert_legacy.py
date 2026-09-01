@@ -11,6 +11,7 @@ serialize the palette/blocks/entities ourselves, by hand, matching the
 format documented in docs/milestone-1-plan.md.
 """
 import argparse
+import gzip
 import logging
 from pathlib import Path
 
@@ -269,7 +270,8 @@ def convert(
 
         destination = Path(dst_path)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        NamedTag(root, "").save_to(str(destination))
+        raw = NamedTag(root, "").save_to(compressed=False)
+        destination.write_bytes(gzip.compress(raw, mtime=0))
 
         print(f"OK  {src_path}")
         print(f"    -> {dst_path}")
