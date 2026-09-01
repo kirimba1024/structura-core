@@ -33,18 +33,19 @@ def plinth_wrap(solid, base_y, radius, geoid_amount, geoid_cell, geoid_salt, smo
     shell = np.zeros_like(solid)
     if radius <= 0:
         return shell
-    layer = solid[:, base_y, :]
-    if not layer.any():
-        return shell
     noise = None
     if geoid_amount > 0:
         noise = patch_noise((solid.shape[0], solid.shape[2]), geoid_cell, geoid_salt) * 2.0 - 1.0
-    field = signed_distance(layer)
-    threshold = radius if noise is None else radius + geoid_amount * noise
-    grown = (field <= threshold) | layer
-    if smoothing > 0:
-        grown = ndimage.gaussian_filter(grown.astype(np.float32), sigma=smoothing) >= 0.5
-    shell[:, base_y, :] = grown & ~layer
+    for y in range(0, base_y + 1):
+        layer = solid[:, y, :]
+        if not layer.any():
+            continue
+        field = signed_distance(layer)
+        threshold = radius if noise is None else radius + geoid_amount * noise
+        grown = (field <= threshold) | layer
+        if smoothing > 0:
+            grown = ndimage.gaussian_filter(grown.astype(np.float32), sigma=smoothing) >= 0.5
+        shell[:, y, :] = grown & ~layer
     return shell
 
 
@@ -458,6 +459,9 @@ def main():
     footprint = footprint[x0:x1 + 1, z0:z1 + 1]
     raw_footprint = raw_footprint[x0:x1 + 1, z0:z1 + 1]
     plinth_shell = plinth_shell[x0:x1 + 1, :, z0:z1 + 1]
+    pod_y0, pod_y1 = depth, min(pod.shape[1], depth + plinth_shell.shape[1])
+    if pod_y1 > pod_y0:
+        plinth_shell[:, :pod_y1 - pod_y0, :] &= ~pod[:, pod_y0:pod_y1, :]
 
     shift = (margin - x0, depth, margin - z0)
     size = (pod.shape[0], src.size[1] + depth, pod.shape[2])
