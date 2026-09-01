@@ -29,14 +29,14 @@ def inradius_of(footprint):
     return float(ndimage.distance_transform_edt(footprint).max())
 
 
-def plinth_wrap(solid, base_y, radius, geoid_amount, geoid_cell, geoid_salt, smoothing=1.5):
+def plinth_wrap(solid, interior_air, base_y, radius, geoid_amount, geoid_cell, geoid_salt, smoothing=1.5):
     shell = np.zeros_like(solid)
     if radius <= 0:
         return shell
     noise = None
     if geoid_amount > 0:
         noise = patch_noise((solid.shape[0], solid.shape[2]), geoid_cell, geoid_salt) * 2.0 - 1.0
-    for y in range(0, base_y + 1):
+    for y in range(0, base_y):
         layer = solid[:, y, :]
         if not layer.any():
             continue
@@ -45,16 +45,21 @@ def plinth_wrap(solid, base_y, radius, geoid_amount, geoid_cell, geoid_salt, smo
         grown = (field <= threshold) | layer
         if smoothing > 0:
             grown = ndimage.gaussian_filter(grown.astype(np.float32), sigma=smoothing) >= 0.5
-        shell[:, y, :] = grown & ~layer
+        shell[:, y, :] = grown & ~layer & ~interior_air[:, y, :]
     return shell
 
 
-def plinth_wrap_blocks(shell, dirt, stone, soil_depth, y_offset=0):
+def plinth_wrap_blocks(shell, solid, grass, dirt, stone, soil_depth, y_offset=0):
     if not shell.any():
         return
+    filled = shell | solid
+    grass_mask = shell & ~np.pad(filled, ((0, 0), (0, 1), (0, 0)))[:, 1:, :]
     surface_dist = ndimage.distance_transform_edt(shell)
     for x, y, z in np.argwhere(shell):
-        material = dirt if surface_dist[x, y, z] <= soil_depth else stone
+        if grass_mask[x, y, z]:
+            material = grass
+        else:
+            material = dirt if surface_dist[x, y, z] <= soil_depth else stone
         yield (int(x), int(y) + y_offset, int(z)), material
 
 
@@ -426,10 +431,11 @@ def main():
         + args.curve_amount + args.side_bulge + args.geoid_amount + args.wrap_radius
     ) + 2
     plinth_shell = plinth_wrap(
-        masks["solid"], base_y, args.wrap_radius,
+        masks["solid"], masks["interior_air"], base_y, args.wrap_radius,
         args.geoid_amount, args.geoid_cell, args.geoid_salt, args.wrap_smoothing,
     )
     plinth_shell = np.pad(plinth_shell, ((margin, margin), (0, 0), (margin, margin)))
+    plinth_solid = np.pad(masks["solid"], ((margin, margin), (0, 0), (margin, margin)))
     raw_footprint = np.pad(raw_footprint, margin)
     footprint = rounded_footprint(
         raw_footprint, args.rounding, args.rounding_threshold,
@@ -459,6 +465,7 @@ def main():
     footprint = footprint[x0:x1 + 1, z0:z1 + 1]
     raw_footprint = raw_footprint[x0:x1 + 1, z0:z1 + 1]
     plinth_shell = plinth_shell[x0:x1 + 1, :, z0:z1 + 1]
+    plinth_solid = plinth_solid[x0:x1 + 1, :, z0:z1 + 1]
     pod_y0, pod_y1 = depth, min(pod.shape[1], depth + plinth_shell.shape[1])
     if pod_y1 > pod_y0:
         plinth_shell[:, :pod_y1 - pod_y0, :] &= ~pod[:, pod_y0:pod_y1, :]
@@ -482,7 +489,8 @@ def main():
                 args.torch_rim_depth,
             ),
             plinth_wrap_blocks(
-                plinth_shell, args.dirt, args.stone, args.soil_depth, depth,
+                plinth_shell, plinth_solid, args.grass, args.dirt, args.stone,
+                args.soil_depth, depth,
             ),
         ),
     )
