@@ -43,6 +43,7 @@ class StructureAnalyzer:
         s = Structure(path)
         self.size = s.size
         self.palette = s.palette
+        self.palette_raw = s.palette_raw
         self.positions = {pos: idx for pos, idx in s.present.items()
                            if s.palette[idx] not in AIR_NAMES}
         self.air_positions = {pos for pos, idx in s.present.items()
@@ -384,13 +385,128 @@ class StructureAnalyzer:
             "cave_friendly_guess": stone_family > 0.5 and glass < 0.05,
         }
 
+    # ---- H. gameplay-relevant, not just geometric ----------------------
+
+    _LIGHT_SOURCES = {
+        "minecraft:torch", "minecraft:wall_torch", "minecraft:soul_torch",
+        "minecraft:soul_wall_torch", "minecraft:lantern", "minecraft:soul_lantern",
+        "minecraft:glowstone", "minecraft:sea_lantern", "minecraft:jack_o_lantern",
+        "minecraft:campfire", "minecraft:soul_campfire", "minecraft:redstone_lamp",
+        "minecraft:shroomlight", "minecraft:beacon", "minecraft:end_rod",
+        "minecraft:ochre_froglight", "minecraft:verdant_froglight",
+        "minecraft:pearlescent_froglight",
+    }
+
+    def light_coverage(self, radius: float = 7.0):
+        """Light-source count, and the fraction of interior_air within
+        `radius` blocks of one (nearest-neighbor query, scipy.spatial.
+        cKDTree -- the standard tool for this, not a real light-
+        propagation simulation: no falloff, no wall occlusion). A dark
+        interior is invisible to every geometric metric here but spawns
+        hostile mobs the moment this piece is placed -- the one gameplay-
+        correctness check this report was missing."""
+        lights = [pos for pos, idx in self.positions.items() if self.palette[idx] in self._LIGHT_SOURCES]
+        if not lights or not self.air_positions:
+            return len(lights), 0.0
+        from scipy.spatial import cKDTree
+
+        tree = cKDTree(np.array(lights))
+        distances, _ = tree.query(np.array(list(self.air_positions)))
+        covered = int((distances <= radius).sum())
+        return len(lights), round(covered / len(self.air_positions), 4)
+
+    _DOOR_FACING = ("north", "south", "east", "west")
+
+    def doors(self):
+        """Door position + facing, straight off palette Properties --
+        convert_legacy.py already detects this shape (for door-clearance
+        air carving), this just reports what it found instead of only
+        acting on it. Lower half only, one entry per door (not two)."""
+        found = []
+        for pos, index in self.positions.items():
+            name = self.palette[index]
+            if not name.endswith("_door"):
+                continue
+            entry = self.palette_raw[index]
+            props = entry.get("Properties")
+            if props is None or str(props.get("half", "")) != "lower":
+                continue
+            facing = props.get("facing")
+            if facing is None or str(facing) not in self._DOOR_FACING:
+                continue
+            found.append({"pos": list(pos), "block": name, "facing": str(facing)})
+        return found
+
+    _MATERIAL_FAMILIES = (
+        ("glass", ("glass",)),
+        ("wood", ("plank", "log", "wood", "oak", "spruce", "birch", "jungle",
+                   "acacia", "dark_oak", "mangrove", "cherry", "bamboo",
+                   "crimson", "warped")),
+        ("stone", ("stone", "cobble", "brick", "andesite", "diorite", "granite",
+                    "deepslate", "blackstone", "basalt", "sandstone", "quartz",
+                    "prismarine", "terracotta", "concrete", "netherrack")),
+        ("metal", ("iron", "copper", "gold", "netherite", "chain")),
+        ("nature", ("leaves", "grass", "dirt", "sand", "gravel", "flower", "vine",
+                     "kelp", "coral", "mycelium", "podzol", "moss", "sapling",
+                     "fern", "bush", "crop", "wart", "mushroom", "lily_pad")),
+        ("functional", ("chest", "furnace", "door", "torch", "lantern", "bed",
+                          "table", "shelf", "barrel", "smoker", "loom", "anvil",
+                          "brewing", "cauldron", "hopper", "dispenser", "dropper",
+                          "redstone", "lever", "button", "plate", "rail", "sign",
+                          "banner", "frame", "armor_stand")),
+    )
+
+    def material_families(self) -> dict:
+        """Block histogram collapsed into a 6-bucket aesthetic fingerprint
+        (wood/stone/glass/metal/nature/functional/other), percentages --
+        one glance instead of reading a 90-row block list. Keyword-
+        substring classifier checked in the order above, first match
+        wins (e.g. oak_door reads as wood, not functional) -- a fast
+        fingerprint, not a precise taxonomy."""
+        hist = self.block_histogram()
+        total = sum(hist.values()) or 1
+        totals = Counter()
+        for name, n in hist.items():
+            base = name.split(":", 1)[-1]
+            family = next(
+                (fam for fam, keys in self._MATERIAL_FAMILIES if any(k in base for k in keys)),
+                "other",
+            )
+            totals[family] += n
+        return {fam: round(100 * n / total, 1) for fam, n in totals.most_common()}
+
+    def summary_line(self, report: dict) -> str:
+        """One line synthesized from an already-built report() dict --
+        the fastest way to grasp "what is this" without reading every
+        field or opening a render."""
+        sx, sy, sz = report["size"]
+        materials = ", ".join(
+            f"{fam} {pct}%" for fam, pct in list(report["material_families"].items())[:2]
+        )
+        angle = report["footprint_axis_deg"]
+        aligned = "grid-aligned" if angle < 5 or angle > 85 else f"rotated {angle} deg"
+        bits = [
+            f"{sx}x{sy}x{sz}",
+            f"{report['floor_count']} floor(s)",
+            f"{report['room_count']} room(s)",
+            materials,
+            aligned,
+            f"{report['door_count']} door(s)",
+            f"light coverage {report['light_coverage'] * 100:.0f}%",
+        ]
+        if report["warnings"]:
+            bits.append(f"{len(report['warnings'])} warning(s)")
+        return " | ".join(bits)
+
     # ---- report -------------------------------------------------------
 
     def report(self) -> dict:
         comps = self.connected_components()
         rooms = self.rooms()
         elongation, axis_angle = self.footprint_elongation()
-        return {
+        doors = self.doors()
+        light_count, light_coverage = self.light_coverage()
+        r = {
             "path": self.path,
             "size": self.size,
             "block_count": len(self.positions),
@@ -413,8 +529,15 @@ class StructureAnalyzer:
             "vertical_profile": self.vertical_profile(),
             "terrain_profile": self.terrain_profile(),
             "environment_fit": self.environment_fit(),
+            "material_families": self.material_families(),
+            "door_count": len(doors),
+            "doors": doors,
+            "light_source_count": light_count,
+            "light_coverage": light_coverage,
             "warnings": self._warnings(comps),
         }
+        r["summary"] = self.summary_line(r)
+        return r
 
     def _warnings(self, comps):
         warnings = []
@@ -471,8 +594,9 @@ def main():
     if args.json:
         print(json.dumps(r, indent=2))
     else:
+        print(f"summary               : {r['summary']}")
         for k, v in r.items():
-            if k == "warnings":
+            if k in ("warnings", "summary"):
                 continue
             print(f"{k:22s}: {v}")
         if r["warnings"]:
