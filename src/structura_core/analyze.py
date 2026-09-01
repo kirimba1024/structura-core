@@ -446,8 +446,28 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("path")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument(
+        "--histogram", action="store_true",
+        help="print block name/count/percent instead of the full report",
+    )
     args = ap.parse_args()
-    r = StructureAnalyzer(args.path).report()
+    analyzer = StructureAnalyzer(args.path)
+
+    if args.histogram:
+        hist = analyzer.block_histogram()
+        total = sum(hist.values()) or 1
+        rows = [
+            {"block": name, "count": n, "percent": round(100 * n / total, 2)}
+            for name, n in hist.most_common()
+        ]
+        if args.json:
+            print(json.dumps(rows, indent=2))
+        else:
+            for row in rows:
+                print(f"{row['count']:7d}  {row['percent']:5.1f}%  {row['block']}")
+        return
+
+    r = analyzer.report()
     if args.json:
         print(json.dumps(r, indent=2))
     else:
