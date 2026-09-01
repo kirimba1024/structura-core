@@ -11,9 +11,10 @@ from .nbt import Structure, save_structure
 from .voxel import closing, signed_distance
 
 
-def base_footprint(envelope, base_y, tolerance=2):
+def base_footprint(envelope, base_y, tolerance=2, lookback=6):
+    bottom = max(0, base_y - lookback)
     top = min(envelope.shape[1], base_y + tolerance + 1)
-    footprint = envelope[:, base_y:top, :].any(axis=1)
+    footprint = envelope[:, bottom:top, :].any(axis=1)
     return ndimage.binary_fill_holes(closing(footprint, 2.0))
 
 

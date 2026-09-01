@@ -68,6 +68,23 @@ def _bottommost_per_column(src, keep):
     return by_column
 
 
+def _extend_through_plinth(solid, base_y, high=0.85, low=0.5, window=15):
+    footprint = solid.any(axis=1)
+    area = int(footprint.sum())
+    if area == 0:
+        return base_y
+    coverage = solid.sum(axis=(0, 2)) / area
+    dipped = False
+    extended = base_y
+    for y in range(base_y, min(solid.shape[1], base_y + window + 1)):
+        if coverage[y] < low:
+            dipped = True
+        elif coverage[y] >= high and dipped:
+            extended = y
+            dipped = False
+    return extended
+
+
 def detect_base_y(src, solid, margin):
     """The structure's own ground/yard level, as one Y. Everything below
     it counts as "already underground": aura/cavern_aura stop there, and
@@ -87,13 +104,21 @@ def detect_base_y(src, solid, margin):
        per (x, z) column, median Y across every column that has one.
     2. Fallback, only when the build has none of those (all-stone, or an
        interior-only cutaway): lowest solid block per column, same median.
+    3. A full-footprint plinth (a raised stone platform, steps) can sit
+       above that median, with a narrower band in between -- extend
+       upward through any such dip-then-recover run, so a house that
+       "starts above those stones" (see notes/[AManofKent]
+       NiceVillageTrain) gets base_y at the plinth's own top, not its
+       bottom edge.
     """
     by_column = _topmost_per_column(src, lambda name: name in GROUND_MARKERS)
     if not by_column:
         by_column = _bottommost_per_column(src, lambda name: name not in AIR_NAMES)
     if not by_column:
-        return int(np.flatnonzero(solid.any(axis=(0, 2)))[0])
-    return int(round(float(np.median(list(by_column.values()))))) + margin
+        base_y = int(np.flatnonzero(solid.any(axis=(0, 2)))[0])
+    else:
+        base_y = int(round(float(np.median(list(by_column.values())))))
+    return _extend_through_plinth(solid, base_y) + margin
 
 
 def adaptive_cavern_radius(solid, minimum=3.0, maximum=6.5):
