@@ -2,6 +2,7 @@
 """Add an organic terrain pod below an enveloped structure."""
 import argparse
 import itertools
+import json
 import math
 
 import numpy as np
@@ -391,6 +392,12 @@ def main():
     )
     parser.add_argument("--wrap-smoothing", type=float, default=1.5)
     parser.add_argument("--masks", help="optional compressed NumPy debug file")
+    parser.add_argument(
+        "--summary-json",
+        help="optional JSON sidecar with size/blocks/pod/footprint/depth/"
+             "start_height -- for a caller that needs depth (e.g. to derive "
+             "worldgen start_height) without parsing the printed summary",
+    )
     args = parser.parse_args()
 
     src = Structure(args.src)
@@ -518,6 +525,14 @@ def main():
         f"footprint={int(footprint.sum())} depth={depth} "
         f"radius={profile[0]:.1f}->{profile.max():.1f}->{profile[-1]:.1f}"
     )
+
+    if args.summary_json:
+        with open(args.summary_json, "w") as output:
+            json.dump({
+                "size": list(size), "blocks": block_count, "pod": int(pod.sum()),
+                "footprint": int(footprint.sum()), "depth": depth,
+                "start_height": -(depth - 1), "ground": ground[0] if ground else [],
+            }, output)
 
 
 if __name__ == "__main__":
