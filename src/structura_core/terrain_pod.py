@@ -30,22 +30,46 @@ def inradius_of(footprint):
     return float(ndimage.distance_transform_edt(footprint).max())
 
 
+def deepest_plinth_inradius(solid, base_y):
+    widest = 0.0
+    for y in range(0, base_y):
+        layer = solid[:, y, :]
+        if not layer.any():
+            continue
+        widest = max(widest, inradius_of(closing(layer, 2.0)))
+    return widest
+
+
+def plinth_reach_profile(solid, base_y, wrap_radius, wrap_taper):
+    best_reach, best_row = 0.0, 0
+    for y in range(0, base_y):
+        layer = solid[:, y, :]
+        if not layer.any():
+            continue
+        reach = (
+            inradius_of(closing(layer, 2.0)) + wrap_radius
+            + wrap_taper * (base_y - 1 - y)
+        )
+        if reach > best_reach:
+            best_reach, best_row = reach, y
+    return best_reach, best_row
+
+
 def plinth_wrap(
-    solid, interior_air, base_y, radius, geoid_amount, geoid_cell, geoid_salt,
-    smoothing=1.5, offsets=None,
+    solid, interior_air, base_y, radius, geoid_amount, geoid_field=None,
+    smoothing=1.5, offsets=None, taper=0.0,
 ):
     shell = np.zeros_like(solid)
     if radius <= 0:
         return shell
-    noise = None
-    if geoid_amount > 0:
-        noise = patch_noise((solid.shape[0], solid.shape[2]), geoid_cell, geoid_salt) * 2.0 - 1.0
     for y in range(0, base_y):
         layer = solid[:, y, :]
         if not layer.any():
             continue
         field = signed_distance(layer)
-        threshold = radius if noise is None else radius + geoid_amount * noise
+        threshold = radius + taper * (base_y - 1 - y)
+        if geoid_field is not None:
+            threshold = threshold + geoid_amount * geoid_field[:, y, :]
         if offsets is not None:
             dx, dz = offsets[min(len(offsets) - 1, max(0, base_y - 1 - y))]
             if dx or dz:
@@ -81,16 +105,17 @@ def smootherstep(edge0, edge1, x):
 BELLY_T = 0.28
 
 
-def radius_profile(inradius, top_radius, bulge, depth):
-    end_radius = top_radius - inradius - 1
-    peak_radius = top_radius + bulge
+def radius_profile(inradius, top_radius, bulge, depth, peak_radius=None, belly_t=BELLY_T):
+    end_radius = min(-2.0, top_radius - inradius - 1)
+    peak_radius = max(top_radius + bulge, peak_radius or 0.0)
+    belly_t = min(max(belly_t, 1e-6), 1.0 - 1e-6)
     t = np.linspace(0.0, 1.0, depth)
-    u = np.clip(t / BELLY_T, 0.0, 1.0)
+    u = np.clip(t / belly_t, 0.0, 1.0)
     rise = 1 - (1 - u) ** 2
-    fall = smootherstep(BELLY_T, 1.0, t)
+    fall = np.clip((t - belly_t) / (1.0 - belly_t), 0.0, 1.0)
     return np.where(
-        t <= BELLY_T,
-        top_radius + bulge * rise,
+        t <= belly_t,
+        top_radius + (peak_radius - top_radius) * rise,
         peak_radius - (peak_radius - end_radius) * fall,
     )
 
@@ -111,7 +136,7 @@ def pod_depth(inradius, top_radius, bulge, max_depth=None):
 
 def build_pod(
     footprint, base_y, depth, profile, smoothing, offsets=None, roundness=0.0,
-    side_bulge=0.0, geoid_amount=0.0, geoid_cell=14, geoid_salt=7,
+    side_bulge=0.0, geoid_amount=0.0, geoid_field=None,
 ):
     field = signed_distance(footprint)
     coords = np.argwhere(footprint)
@@ -127,18 +152,18 @@ def build_pod(
         (profile - profile[0]) / (profile.max() - profile[0] + 1e-9), 0.0, None,
     )
     side_lobes = np.clip(np.cos(4 * np.arctan2(grid[1], grid[0])), 0.0, None)
-    geoid_field = None
-    if geoid_amount > 0:
-        geoid_field = patch_noise(footprint.shape, geoid_cell, geoid_salt) * 2.0 - 1.0
-    pod = np.zeros((footprint.shape[0], base_y + depth, footprint.shape[1]), dtype=bool)
-    top_y = base_y + depth - 1
+    pod_height = max(base_y, depth)
+    pod = np.zeros((footprint.shape[0], pod_height, footprint.shape[1]), dtype=bool)
+    top_y = pod_height - 1
     for layer, radius in enumerate(profile):
         circle_r = circle_r_by_layer[layer]
         layer_field = field if circle_r <= 0 else np.minimum(field, disk_dist - circle_r)
         if side_bulge > 0:
             layer_field = layer_field - side_bulge * rise_frac[layer] * side_lobes
         if geoid_field is not None:
-            layer_field = layer_field - geoid_amount * rise_frac[layer] * geoid_field
+            layer_field = (
+                layer_field - geoid_amount * rise_frac[layer] * geoid_field[:, top_y - layer, :]
+            )
         dx, dz = offsets[layer] if offsets is not None else (0.0, 0.0)
         layer_field = layer_field if dx == 0 and dz == 0 else ndimage.shift(
             layer_field, (-dx, -dz), order=1, mode="constant", cval=layer_field.max() + 1,
@@ -181,6 +206,10 @@ def carve_pits(pod, protect_footprint, count, min_radius, max_radius, salt=11):
         bite = np.sqrt((gx - x) ** 2 + ((gy - y) * 1.3) ** 2 + (gz - z) ** 2) <= radius
         bite &= ~protect_footprint[x0:x1, None, z0:z1]
         pod[x0:x1, y0:y1, z0:z1][bite] = False
+        region = pod[x0:x1, y0:y1, z0:z1]
+        pod[x0:x1, y0:y1, z0:z1] = ndimage.gaussian_filter(
+            region.astype(np.float32), sigma=0.8,
+        ) >= 0.5
     return pod
 
 
@@ -391,6 +420,18 @@ def main():
              "cellar inside the plinth is untouched",
     )
     parser.add_argument("--wrap-smoothing", type=float, default=1.5)
+    parser.add_argument(
+        "--wrap-taper", type=float, default=0.35,
+        help="widen the plinth-wrap collar by this many extra blocks of "
+             "radius per layer of depth below base_y (an angle-of-repose "
+             "talus slope, not a flat offset) -- --wrap-radius alone reads "
+             "fine as a thin skin around a small step or porch footing, "
+             "but is barely visible against a tall embedded basement/hill "
+             "that fills most of the footprint for many layers; taper "
+             "makes the collar naturally widen with depth so it still "
+             "reads at any plinth height without retuning --wrap-radius "
+             "per-structure. 0 restores the old flat behavior",
+    )
     parser.add_argument("--masks", help="optional compressed NumPy debug file")
     parser.add_argument(
         "--summary-json",
@@ -439,30 +480,73 @@ def main():
         parser.error("--geoid-amount must be non-negative")
     if args.geoid_cell < 1:
         parser.error("--geoid-cell must be at least 1")
+    if args.wrap_radius < 0 or args.wrap_taper < 0:
+        parser.error("--wrap-radius and --wrap-taper must be non-negative")
 
     ground = ground_palette(src, raw_footprint, base_y) if args.auto_ground else None
 
+    max_wrap_radius = (
+        args.wrap_radius + args.wrap_taper * max(0, base_y - 1)
+        if args.wrap_radius > 0 else 0.0
+    )
     margin = math.ceil(
         args.top_radius + args.bulge + 2 * args.rounding + 2 * args.smoothing
-        + args.curve_amount + args.side_bulge + args.geoid_amount + args.wrap_radius
+        + args.curve_amount + args.side_bulge + args.geoid_amount + max_wrap_radius
     ) + 2
     raw_footprint = np.pad(raw_footprint, margin)
     footprint = rounded_footprint(
         raw_footprint, args.rounding, args.rounding_threshold,
     )
-    inradius = inradius_of(footprint)
-    depth = pod_depth(inradius, args.top_radius, args.bulge, args.max_depth)
-    profile = radius_profile(inradius, args.top_radius, args.bulge, depth)
+
+    xz_padding = ((margin, margin), (0, 0), (margin, margin))
+    plinth_solid = np.pad(masks["solid"], xz_padding)
+    plinth_interior_air = np.pad(masks["interior_air"], xz_padding)
+
+    plinth_rows = base_y + 1
+    inradius = max(inradius_of(footprint), deepest_plinth_inradius(plinth_solid, plinth_rows))
+
+    if args.wrap_radius > 0:
+        plinth_peak_radius, plinth_peak_row = plinth_reach_profile(
+            plinth_solid, plinth_rows, args.wrap_radius, args.wrap_taper,
+        )
+        plinth_peak_radius = plinth_peak_radius or None
+        effective_bulge = max(args.bulge, (plinth_peak_radius or 0.0) - args.top_radius)
+    else:
+        plinth_peak_radius, plinth_peak_row = None, 0
+        effective_bulge = args.bulge
+    depth = pod_depth(inradius, args.top_radius, effective_bulge, args.max_depth)
     offsets = curve_offsets(depth, args.curve_amount, args.curve_angle, args.curve_twist)
-    plinth_shell = plinth_wrap(
-        masks["solid"], masks["interior_air"], base_y, args.wrap_radius,
-        args.geoid_amount, args.geoid_cell, args.geoid_salt, args.wrap_smoothing, offsets,
+
+    pod_height = max(plinth_rows, depth)
+    shift_y = pod_height - plinth_rows
+
+    if plinth_peak_radius is not None:
+        belly_layer = (pod_height - 1) - (shift_y + plinth_peak_row)
+        belly_t = belly_layer / max(depth - 1, 1)
+    else:
+        belly_t = BELLY_T
+    profile = radius_profile(
+        inradius, args.top_radius, args.bulge, depth, plinth_peak_radius, belly_t,
     )
-    plinth_shell = np.pad(plinth_shell, ((margin, margin), (0, 0), (margin, margin)))
-    plinth_solid = np.pad(masks["solid"], ((margin, margin), (0, 0), (margin, margin)))
+
+    geoid_field = None
+    if args.geoid_amount > 0:
+        geoid_field = patch_noise_3d(
+            (footprint.shape[0], pod_height, footprint.shape[1]),
+            args.geoid_cell, args.geoid_salt,
+        ) * 2.0 - 1.0
+
+    plinth_geoid_field = (
+        geoid_field[:, shift_y:shift_y + plinth_rows, :] if geoid_field is not None else None
+    )
+    plinth_shell = plinth_wrap(
+        plinth_solid, plinth_interior_air, plinth_rows, args.wrap_radius,
+        args.geoid_amount, plinth_geoid_field, args.wrap_smoothing, offsets,
+        args.wrap_taper,
+    )
     pod = build_pod(
-        footprint, base_y, depth, profile, args.smoothing, offsets, args.roundness,
-        args.side_bulge, args.geoid_amount, args.geoid_cell, args.geoid_salt,
+        footprint, plinth_rows, depth, profile, args.smoothing, offsets, args.roundness,
+        args.side_bulge, args.geoid_amount, geoid_field,
     )
     if args.pit_count > 0:
         protect = ndimage.binary_dilation(raw_footprint, iterations=args.pit_protect_margin)
@@ -472,24 +556,24 @@ def main():
         )
     pod = keep_largest_component(pod)
 
-    pod_xz = np.argwhere(pod.any(axis=1))
-    x0 = min(margin, int(pod_xz[:, 0].min()))
-    z0 = min(margin, int(pod_xz[:, 1].min()))
-    x1 = max(margin + src.size[0] - 1, int(pod_xz[:, 0].max()))
-    z1 = max(margin + src.size[2] - 1, int(pod_xz[:, 1].max()))
+    extent_xz = np.argwhere(pod.any(axis=1) | plinth_shell.any(axis=1))
+    x0 = min(margin, int(extent_xz[:, 0].min()))
+    z0 = min(margin, int(extent_xz[:, 1].min()))
+    x1 = max(margin + src.size[0] - 1, int(extent_xz[:, 0].max()))
+    z1 = max(margin + src.size[2] - 1, int(extent_xz[:, 1].max()))
     pod = pod[x0:x1 + 1, :, z0:z1 + 1]
     footprint = footprint[x0:x1 + 1, z0:z1 + 1]
     raw_footprint = raw_footprint[x0:x1 + 1, z0:z1 + 1]
     plinth_shell = plinth_shell[x0:x1 + 1, :, z0:z1 + 1]
     plinth_solid = plinth_solid[x0:x1 + 1, :, z0:z1 + 1]
     plinth_in_pod_frame = np.zeros_like(pod)
-    pod_y0, pod_y1 = depth, min(pod.shape[1], depth + plinth_shell.shape[1])
+    pod_y0, pod_y1 = shift_y, min(pod.shape[1], shift_y + plinth_shell.shape[1])
     if pod_y1 > pod_y0:
         plinth_shell[:, :pod_y1 - pod_y0, :] &= ~pod[:, pod_y0:pod_y1, :]
         plinth_in_pod_frame[:, pod_y0:pod_y1, :] = plinth_shell[:, :pod_y1 - pod_y0, :]
 
-    shift = (margin - x0, depth, margin - z0)
-    size = (pod.shape[0], src.size[1] + depth, pod.shape[2])
+    shift = (margin - x0, shift_y, margin - z0)
+    size = (pod.shape[0], src.size[1] + shift_y, pod.shape[2])
     pod_center = np.argwhere(raw_footprint).mean(axis=0)
     block_count = save_structure(
         src, args.dst, size, shift,
@@ -508,7 +592,7 @@ def main():
             ),
             plinth_wrap_blocks(
                 plinth_shell, plinth_solid, args.grass, args.dirt, args.stone,
-                args.soil_depth, depth,
+                args.soil_depth, shift_y,
             ),
         ),
     )
@@ -518,7 +602,7 @@ def main():
             np.savez_compressed(
                 output, raw_footprint=raw_footprint, footprint=footprint,
                 pod=pod, profile=profile,
-                shift=np.asarray(shift), base_y=base_y + depth,
+                shift=np.asarray(shift), base_y=base_y + shift_y,
             )
 
     ground_names = ", ".join(ground[0]) if ground else "none"
@@ -533,7 +617,7 @@ def main():
             json.dump({
                 "size": list(size), "blocks": block_count, "pod": int(pod.sum()),
                 "footprint": int(footprint.sum()), "depth": depth,
-                "start_height": -(depth - 1), "ground": ground[0] if ground else [],
+                "start_height": -(pod_height - 1), "ground": ground[0] if ground else [],
             }, output)
 
 

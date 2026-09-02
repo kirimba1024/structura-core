@@ -74,14 +74,13 @@ def _extend_through_plinth(solid, base_y, high=0.85, low=0.5, window=15):
     if area == 0:
         return base_y
     coverage = solid.sum(axis=(0, 2)) / area
-    dipped = False
+    saw_dip = False
     extended = base_y
     for y in range(base_y, min(solid.shape[1], base_y + window + 1)):
         if coverage[y] < low:
-            dipped = True
-        elif coverage[y] >= high and dipped:
+            saw_dip = True
+        elif coverage[y] >= high and saw_dip:
             extended = y
-            dipped = False
     return extended
 
 
@@ -114,11 +113,11 @@ def detect_base_y(src, solid, margin):
     by_column = _topmost_per_column(src, lambda name: name in GROUND_MARKERS)
     if not by_column:
         by_column = _bottommost_per_column(src, lambda name: name not in AIR_NAMES)
-    if not by_column:
-        base_y = int(np.flatnonzero(solid.any(axis=(0, 2)))[0])
+    if by_column:
+        base_y = int(round(float(np.median(list(by_column.values()))))) + margin
     else:
-        base_y = int(round(float(np.median(list(by_column.values())))))
-    return _extend_through_plinth(solid, base_y) + margin
+        base_y = int(np.flatnonzero(solid.any(axis=(0, 2)))[0])
+    return _extend_through_plinth(solid, base_y)
 
 
 def adaptive_cavern_radius(solid, minimum=3.0, maximum=6.5):
@@ -138,7 +137,9 @@ def bubble_geometry(protected_volume, base_y, shape, glass_thickness):
     high = points.max(axis=0).astype(float)
     center = (low + high) / 2.0
     center[1] = base_y if shape == "hemisphere" else (base_y + high[1]) / 2.0
-    offsets = np.abs(points - center)
+    above_ground = points[points[:, 1] >= base_y]
+    sizing_points = above_ground if len(above_ground) else points
+    offsets = np.abs(sizing_points - center)
     if shape == "fitted":
         power = 4.0
         radii = np.maximum(offsets.max(axis=0), 0.5)
@@ -179,6 +180,15 @@ def main():
     parser.add_argument(
         "--dome-fit", choices=("envelope", "cavern"), default="envelope",
     )
+    parser.add_argument(
+        "--base-y", type=int, default=None,
+        help="override detect_base_y with an exact ground-level Y, in the "
+             "source structure's own coordinates (0 = its bottom layer) -- "
+             "for the rare structure autodetection guesses wrong on (no "
+             "reliable GROUND_MARKERS, an ambiguous plinth): read the Y off "
+             "a render or region_report.py and pass it directly instead of "
+             "fighting the heuristic",
+    )
     parser.add_argument("--masks", help="optional compressed NumPy debug file")
     args = parser.parse_args()
     radii = [args.envelope_radius, args.aura_radius]
@@ -195,6 +205,8 @@ def main():
         parser.error("cavern aura must be disabled or at least as wide as aura")
 
     src = Structure(args.src)
+    if args.base_y is not None and not 0 <= args.base_y < src.size[1]:
+        parser.error("--base-y must be within the structure's own Y range")
     solid = np.zeros(src.size, dtype=bool)
     explicit_air = np.zeros(src.size, dtype=bool)
     for pos, idx in src.present.items():
@@ -216,7 +228,10 @@ def main():
     padding = ((margin, margin), (margin, margin), (margin, margin))
     solid = np.pad(solid, padding)
     explicit_air = np.pad(explicit_air, padding)
-    base_y = detect_base_y(src, solid, margin)
+    if args.base_y is not None:
+        base_y = args.base_y + margin
+    else:
+        base_y = detect_base_y(src, solid, margin)
 
     envelope, surface, interior_air, aura, cavern_aura = compute_masks(
         solid, args.envelope_radius, args.aura_radius,
@@ -327,6 +342,8 @@ def main():
                 glass_layers=args.glass_layers, glass_gap=args.glass_gap,
             )
 
+    base_y_mode = "manual" if args.base_y is not None else "auto"
+    print(f"base_y={base_y} ({base_y_mode})")
     print(f"size={envelope.shape} blocks={block_count}")
     print(f"envelope={int(envelope.sum())} surface={int(surface.sum())}")
     print(
