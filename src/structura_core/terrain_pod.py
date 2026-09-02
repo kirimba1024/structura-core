@@ -294,7 +294,7 @@ def pod_blocks(pod, soil_depth, grass, dirt, stone, hidden_top=None, ground=None
         yield (int(x), int(y), int(z)), material
 
 
-def vine_blocks(pod, density, max_length, center=None, lean_angle=None, lean_boost=2.0):
+def vine_blocks(pod, density, max_length, center=None, lean_angle=None, lean_boost=2.0, claimed=None):
     if density <= 0:
         return
     overhang = pod.copy()
@@ -310,7 +310,7 @@ def vine_blocks(pod, density, max_length, center=None, lean_angle=None, lean_boo
         if hash3(x, y, z, 3) >= int(local_density * 255):
             continue
         anchor_y = y - 1
-        if anchor_y < 0 or pod[x, anchor_y, z]:
+        if anchor_y < 0 or pod[x, anchor_y, z] or (claimed is not None and claimed[x, anchor_y, z]):
             continue
         if hash3(x, y, z, 5) < 25:
             yield (int(x), int(anchor_y), int(z)), "minecraft:glow_lichen[up=true]"
@@ -319,7 +319,7 @@ def vine_blocks(pod, density, max_length, center=None, lean_angle=None, lean_boo
         segments = []
         for i in range(1, length + 1):
             py = y - i
-            if py < 0 or pod[x, py, z]:
+            if py < 0 or pod[x, py, z] or (claimed is not None and claimed[x, py, z]):
                 break
             segments.append(py)
         for i, py in enumerate(segments):
@@ -482,9 +482,11 @@ def main():
     raw_footprint = raw_footprint[x0:x1 + 1, z0:z1 + 1]
     plinth_shell = plinth_shell[x0:x1 + 1, :, z0:z1 + 1]
     plinth_solid = plinth_solid[x0:x1 + 1, :, z0:z1 + 1]
+    plinth_in_pod_frame = np.zeros_like(pod)
     pod_y0, pod_y1 = depth, min(pod.shape[1], depth + plinth_shell.shape[1])
     if pod_y1 > pod_y0:
         plinth_shell[:, :pod_y1 - pod_y0, :] &= ~pod[:, pod_y0:pod_y1, :]
+        plinth_in_pod_frame[:, pod_y0:pod_y1, :] = plinth_shell[:, :pod_y1 - pod_y0, :]
 
     shift = (margin - x0, depth, margin - z0)
     size = (pod.shape[0], src.size[1] + depth, pod.shape[2])
@@ -498,7 +500,7 @@ def main():
             ),
             vine_blocks(
                 pod, args.vine_density, args.vine_length,
-                pod_center, args.curve_angle,
+                pod_center, args.curve_angle, claimed=plinth_in_pod_frame,
             ),
             pod_torch_blocks(
                 pod, raw_footprint, args.torch_density, args.torch_max_distance,
