@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "structura-core"
-version = "0.1.0"
-description = "Validated Minecraft Structure NBT, voxel geometry and worldgen tooling"
+version = "0.2.0"
+description = "Validated Minecraft Structure NBT I/O, legacy conversion and voxel geometry"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -20,19 +20,9 @@ legacy = ["amulet-core>=1.9,<2"]
 [project.scripts]
 structura-analyze = "structura_core.analyze:main"
 structura-convert-legacy = "structura_core.convert_legacy:main"
-structura-envelope = "structura_core.envelope:main"
-structura-terrain-pod = "structura_core.terrain_pod:main"
-structura-add-chest-loot = "structura_core.chest_loot:main"
-structura-add-default-loot = "structura_core.default_loot:main"
-structura-build-loot-tables = "structura_core.loot_tables:main"
-structura-build-biome-tags = "structura_core.biome_tags:main"
-structura-build-processor-list = "structura_core.processor_list:main"
-structura-build-worldgen = "structura_core.worldgen:main"
-structura-add-dome-doors = "structura_core.dome_doors:main"
 structura-export-schematic = "structura_core.export_schematic:main"
 structura-check-doors = "structura_core.check_doors:main"
 structura-check-leaks = "structura_core.check_leaks:main"
-structura-debug-interior-air = "structura_core.debug_interior_air:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
