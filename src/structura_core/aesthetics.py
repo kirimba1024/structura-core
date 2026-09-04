@@ -113,14 +113,19 @@ def longest_straight_run(solid):
     )
 
 
-def palette_balance(structure):
-    """The 60-30-10 split, as a histogram check. Roughly 60/30/10 passes;
-    100/0/0 is monotone and twenty blocks at 5% each is confetti."""
+def block_counts(structure):
     counts = Counter()
     for index in structure.present.values():
         name = structure.palette[index]
         if name not in AIR_NAMES:
             counts[name] += 1
+    return counts
+
+
+def palette_balance(structure):
+    """The 60-30-10 split, as a histogram check. Roughly 60/30/10 passes;
+    100/0/0 is monotone and twenty blocks at 5% each is confetti."""
+    counts = block_counts(structure)
     total = max(sum(counts.values()), 1)
     shares = [count / total for _, count in counts.most_common(3)]
     shares += [0.0] * (3 - len(shares))
@@ -128,6 +133,51 @@ def palette_balance(structure):
         distinct=len(counts),
         top_three=[round(share, 3) for share in shares],
         dominance=round(shares[0], 3),
+    )
+
+
+def luminance(rgb):
+    """Perceived brightness, Rec. 601. Value contrast is what makes a build
+    read at distance; hue barely survives the trip."""
+    red, green, blue = rgb[:3]
+    return 0.299 * red + 0.587 * green + 0.114 * blue
+
+
+def palette_colour(counts, colors):
+    """Value spread and temperature, given a name-to-RGB table.
+
+    Colour is the largest axis this module was missing and the easiest to
+    get wrong architecturally: the real block colours live in the render
+    library, which reads them out of the client jar, and analysis must not
+    start depending on a renderer. So the table is passed in. Callers that
+    have textures supply real colours; callers that do not simply skip this.
+
+    Two numbers, both from builders' own advice. Value spread, because a
+    palette with no light-to-dark range reads as a flat smear from any
+    distance however varied it is up close. And warm share, because mixing
+    warm and cool families with nothing between them is the clash guides
+    name most often."""
+    weighted = [(count, colors[name]) for name, count in counts.items()
+                if name in colors]
+    if not weighted:
+        return None
+    total = sum(count for count, _ in weighted)
+    values = np.array([luminance(rgb) for _, rgb in weighted])
+    weights = np.array([count for count, _ in weighted], dtype=float) / total
+    order = np.argsort(values)
+    sorted_values, sorted_weights = values[order], weights[order]
+    cumulative = np.cumsum(sorted_weights)
+    low = float(sorted_values[np.searchsorted(cumulative, 0.10)])
+    high = float(sorted_values[min(np.searchsorted(cumulative, 0.90),
+                                   len(sorted_values) - 1)])
+    warm = sum(weight for weight, (_, rgb) in zip(weights, weighted)
+               if rgb[0] > rgb[2])
+    return dict(
+        covered=round(total / max(sum(counts.values()), 1), 3),
+        value_mean=round(float((values * weights).sum()), 1),
+        value_spread=round(float(np.sqrt((weights * (values - (values * weights).sum()) ** 2).sum())), 1),
+        value_range=round(high - low, 1),
+        warm_share=round(float(warm), 3),
     )
 
 
@@ -184,6 +234,9 @@ def flags(data):
     if (silhouette_data["bbox_fill"] > BOX_FILL_LIMIT
             and silhouette_data["top_levels"] <= BOX_LEVEL_LIMIT):
         raised.append("box-like: fills its bounding box with almost no roofline")
+    colour = data.get("colour")
+    if colour and colour["covered"] > 0.5 and colour["value_range"] < 30:
+        raised.append("no value spread: reads as a flat smear at distance")
     if data["flat_wall"] > FLAT_WALL_LIMIT:
         raised.append("flat wall: too much mass on one vertical slice")
     if palette["dominance"] > 0.8:
@@ -199,7 +252,7 @@ def flags(data):
     return raised
 
 
-def report(path):
+def report(path, colors=None):
     structure = Structure(path)
     solid = solid_mask(structure)
     return dict(
@@ -210,6 +263,7 @@ def report(path):
         palette=palette_balance(structure),
         construction=construction_tells(solid),
         capture=capture_tells(structure, solid),
+        colour=palette_colour(block_counts(structure), colors) if colors else None,
     )
 
 
