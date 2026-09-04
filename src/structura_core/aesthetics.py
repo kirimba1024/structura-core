@@ -225,9 +225,44 @@ def capture_tells(structure, solid):
     )
 
 
+# How much each hint should be believed, not how bad the defect is. Debris
+# and an orphan canopy are capture litter -- nobody built them on purpose, so
+# the hint is almost always right. A monotone palette or a box-like massing
+# may be exactly what the author intended (a snow build, an underground
+# room), so those hints are worth raising and not worth trusting.
+HINT_CONFIDENCE = {
+    "debris": 0.9,
+    "orphan canopy": 0.9,
+    "scattered": 0.8,
+    "flat wall": 0.5,
+    "no value spread": 0.4,
+    "confetti palette": 0.4,
+    "box-like": 0.3,
+    "monotone palette": 0.3,
+}
+
+
+def review_score(data):
+    """A queue order, not a verdict.
+
+    Beauty has no gold standard here and probably cannot have one, but it
+    does have heuristic regularities, and so does ugliness. The honest use
+    of those is soft: to decide what a person looks at FIRST, to hint at
+    what to look for when they get there, and to save them opening the
+    obvious cases. Never to reject anything on its own.
+
+    Weighted by confidence rather than by severity, because severity is a
+    taste judgement and confidence is not. A hint that nobody builds on
+    purpose counts for more than a hint that might be the author's whole
+    intention."""
+    return round(sum(HINT_CONFIDENCE.get(hint.split(":")[0], 0.5)
+                     for hint in flags(data)), 2)
+
+
 def flags(data):
-    """The subset of the ugliness list that a number can honestly raise.
-    Counts on the 235-piece archive are in the commit that added this."""
+    """Hints, not verdicts: the subset of the ugliness list a number can
+    honestly raise. Read every one beside the archetype -- a box-like score
+    damns a house and is simply correct for a block of captured ground."""
     silhouette_data, palette, construction, capture = (
         data["silhouette"], data["palette"], data["construction"], data["capture"])
     raised = []
@@ -293,7 +328,8 @@ def main():
           f"whisker columns {cons['whisker_columns']}, debris {cons['debris_components']}")
     print(f"  capture      {cap['cut_faces']} box faces touched, orphan canopy: {cap['orphan_canopy']}")
     raised = flags(data)
-    print("  flags        " + ("none" if not raised else ""))
+    print(f"  review       score {review_score(data):.2f} "
+          f"({'nothing to look at' if not raised else str(len(raised)) + ' hint(s)'})")
     for flag in raised:
         print(f"               - {flag}")
 
