@@ -25,6 +25,15 @@ from .nbt import AIR_NAMES, Structure
 
 NATURAL_RUN_LIMIT = 7
 
+# Calibrated against the archive rather than guessed. Across 235 pieces the
+# largest coplanar vertical patch runs p10 0.010, median 0.056, p90 0.124 and
+# never exceeds 0.20, so a threshold of 0.25 -- chosen before the scan --
+# flagged nothing at all. 0.15 selects roughly the worst twentieth, which is
+# what a prefilter is for.
+FLAT_WALL_LIMIT = 0.15
+BOX_FILL_LIMIT = 0.7
+BOX_LEVEL_LIMIT = 4
+
 
 def solid_mask(structure):
     width, height, depth = structure.size
@@ -166,6 +175,30 @@ def capture_tells(structure, solid):
     )
 
 
+def flags(data):
+    """The subset of the ugliness list that a number can honestly raise.
+    Counts on the 235-piece archive are in the commit that added this."""
+    silhouette_data, palette, construction, capture = (
+        data["silhouette"], data["palette"], data["construction"], data["capture"])
+    raised = []
+    if (silhouette_data["bbox_fill"] > BOX_FILL_LIMIT
+            and silhouette_data["top_levels"] <= BOX_LEVEL_LIMIT):
+        raised.append("box-like: fills its bounding box with almost no roofline")
+    if data["flat_wall"] > FLAT_WALL_LIMIT:
+        raised.append("flat wall: too much mass on one vertical slice")
+    if palette["dominance"] > 0.8:
+        raised.append("monotone palette: one block is most of the build")
+    if palette["distinct"] > 60 and palette["dominance"] < 0.25:
+        raised.append("confetti palette: many blocks, none dominant")
+    if capture["orphan_canopy"]:
+        raised.append("orphan canopy: leaves the selection cut away from their logs")
+    if construction["debris_components"] > 40:
+        raised.append("debris: many tiny disconnected components")
+    if construction["largest_share"] < 0.5:
+        raised.append("scattered: most of the mass is off the main body")
+    return raised
+
+
 def report(path):
     structure = Structure(path)
     solid = solid_mask(structure)
@@ -178,6 +211,12 @@ def report(path):
         construction=construction_tells(solid),
         capture=capture_tells(structure, solid),
     )
+
+
+def report_with_flags(path):
+    data = report(path)
+    data["flags"] = flags(data)
+    return data
 
 
 def main():
@@ -199,6 +238,10 @@ def main():
     print(f"  construction floating {cons['floating']} ({100 * cons['floating_share']:.1f}%), "
           f"whisker columns {cons['whisker_columns']}, debris {cons['debris_components']}")
     print(f"  capture      {cap['cut_faces']} box faces touched, orphan canopy: {cap['orphan_canopy']}")
+    raised = flags(data)
+    print("  flags        " + ("none" if not raised else ""))
+    for flag in raised:
+        print(f"               - {flag}")
 
 
 if __name__ == "__main__":
