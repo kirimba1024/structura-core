@@ -1,19 +1,4 @@
 #!/usr/bin/env python3
-"""Cheap proxies for the two mistakes builders name most often.
-
-Not a beauty score. Beauty in a voxel world is partly honesty to the medium
-and no number expresses that. What these catch is the short list of defects
-that builders themselves write down -- the single cuboid, the flat wall, the
-monotone or confetti palette, the floating block, the half-cut tree -- so a
-human looks at fewer obviously-broken pieces.
-
-Every figure has to be read beside the archetype. A bounding-box fill of
-0.76 damns a house and is simply correct for a block of captured ground,
-which is supposed to be solid. A metric applied across types measures type.
-The dangerous failure of an automatic filter is confident rejection:
-passing something mediocre costs one bad structure in a world, rejecting
-something excellent loses it permanently, so read these generously.
-"""
 import argparse
 import json
 from collections import Counter
@@ -25,11 +10,6 @@ from .nbt import AIR_NAMES, Structure
 
 NATURAL_RUN_LIMIT = 7
 
-# Calibrated against the archive rather than guessed. Across 235 pieces the
-# largest coplanar vertical patch runs p10 0.010, median 0.056, p90 0.124 and
-# never exceeds 0.20, so a threshold of 0.25 -- chosen before the scan --
-# flagged nothing at all. 0.15 selects roughly the worst twentieth, which is
-# what a prefilter is for.
 FLAT_WALL_LIMIT = 0.15
 BOX_FILL_LIMIT = 0.7
 BOX_LEVEL_LIMIT = 4
@@ -45,8 +25,6 @@ def solid_mask(structure):
 
 
 def silhouette(solid):
-    """The silhouette test, made arithmetic. A build should read as a black
-    shape against a sunset; a single box does not."""
     occupied = np.argwhere(solid)
     if not occupied.size:
         return dict(bbox_fill=0.0, top_levels=0, aspect=0.0)
@@ -65,9 +43,6 @@ def silhouette(solid):
 
 
 def flat_wall(solid):
-    """The most-cited beginner mistake: a flat single-block wall. Measured as
-    the largest connected patch on any single vertical slice, which is the
-    same operator used for flat plates on terrain."""
     largest = 0
     for axis in (0, 2):
         for index in range(solid.shape[axis]):
@@ -81,9 +56,6 @@ def flat_wall(solid):
 
 
 def longest_straight_run(solid):
-    """Terraforming guides put the limit at about seven blocks in a straight
-    line on anything meant to look natural. Reported as the share of runs
-    that exceed it, which is more useful than the maximum."""
     footprint = solid.any(axis=1)
     if not footprint.any():
         return dict(run_p95=0.0, run_max=0, over_limit=0.0)
@@ -123,8 +95,6 @@ def block_counts(structure):
 
 
 def palette_balance(structure):
-    """The 60-30-10 split, as a histogram check. Roughly 60/30/10 passes;
-    100/0/0 is monotone and twenty blocks at 5% each is confetti."""
     counts = block_counts(structure)
     total = max(sum(counts.values()), 1)
     shares = [count / total for _, count in counts.most_common(3)]
@@ -137,26 +107,11 @@ def palette_balance(structure):
 
 
 def luminance(rgb):
-    """Perceived brightness, Rec. 601. Value contrast is what makes a build
-    read at distance; hue barely survives the trip."""
     red, green, blue = rgb[:3]
     return 0.299 * red + 0.587 * green + 0.114 * blue
 
 
 def palette_colour(counts, colors):
-    """Value spread and temperature, given a name-to-RGB table.
-
-    Colour is the largest axis this module was missing and the easiest to
-    get wrong architecturally: the real block colours live in the render
-    library, which reads them out of the client jar, and analysis must not
-    start depending on a renderer. So the table is passed in. Callers that
-    have textures supply real colours; callers that do not simply skip this.
-
-    Two numbers, both from builders' own advice. Value spread, because a
-    palette with no light-to-dark range reads as a flat smear from any
-    distance however varied it is up close. And warm share, because mixing
-    warm and cool families with nothing between them is the clash guides
-    name most often."""
     weighted = [(count, colors[name]) for name, count in counts.items()
                 if name in colors]
     if not weighted:
@@ -182,8 +137,6 @@ def palette_colour(counts, colors):
 
 
 def construction_tells(solid):
-    """Floating blocks and one-wide whiskers: both are things nobody builds
-    on purpose and both are cheap to count."""
     supported = np.zeros_like(solid)
     supported[:, 1:, :] = solid[:, :-1, :]
     rows = np.arange(solid.shape[1])[None, :, None]
@@ -203,8 +156,6 @@ def construction_tells(solid):
 
 
 def capture_tells(structure, solid):
-    """Defects that are ours to detect and not the author's fault: a canopy
-    the selection cut in half, and material flush against a box wall."""
     leaves = logs = 0
     for index in structure.present.values():
         name = structure.palette[index]
@@ -225,11 +176,6 @@ def capture_tells(structure, solid):
     )
 
 
-# How much each hint should be believed, not how bad the defect is. Debris
-# and an orphan canopy are capture litter -- nobody built them on purpose, so
-# the hint is almost always right. A monotone palette or a box-like massing
-# may be exactly what the author intended (a snow build, an underground
-# room), so those hints are worth raising and not worth trusting.
 HINT_CONFIDENCE = {
     "debris": 0.9,
     "orphan canopy": 0.9,
@@ -243,26 +189,11 @@ HINT_CONFIDENCE = {
 
 
 def review_score(data):
-    """A queue order, not a verdict.
-
-    Beauty has no gold standard here and probably cannot have one, but it
-    does have heuristic regularities, and so does ugliness. The honest use
-    of those is soft: to decide what a person looks at FIRST, to hint at
-    what to look for when they get there, and to save them opening the
-    obvious cases. Never to reject anything on its own.
-
-    Weighted by confidence rather than by severity, because severity is a
-    taste judgement and confidence is not. A hint that nobody builds on
-    purpose counts for more than a hint that might be the author's whole
-    intention."""
     return round(sum(HINT_CONFIDENCE.get(hint.split(":")[0], 0.5)
                      for hint in flags(data)), 2)
 
 
 def flags(data):
-    """Hints, not verdicts: the subset of the ugliness list a number can
-    honestly raise. Read every one beside the archetype -- a box-like score
-    damns a house and is simply correct for a block of captured ground."""
     silhouette_data, palette, construction, capture = (
         data["silhouette"], data["palette"], data["construction"], data["capture"])
     raised = []
@@ -309,7 +240,9 @@ def report_with_flags(path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description="beauty heuristics: what to look at first, never what to reject",
+    )
     parser.add_argument("path")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
