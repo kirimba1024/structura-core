@@ -18,6 +18,7 @@ from collections import Counter
 
 import numpy as np
 
+from .materials import METRIC_NATURAL_BLOCKS
 from .nbt import AIR_NAMES, Structure
 
 
@@ -238,12 +239,7 @@ class StructureAnalyzer:
     #  because attached terrain is topologically indistinguishable from
     #  intentional building material (see: SmallHouse.schematic, height 76,
     #  ~11% dirt+grass+stone, one connected & fully grounded component).
-    _NATURAL_BLOCKS = {
-        "minecraft:dirt", "minecraft:grass_block", "minecraft:stone",
-        "minecraft:gravel", "minecraft:sand", "minecraft:coarse_dirt",
-        "minecraft:podzol", "minecraft:mycelium", "minecraft:andesite",
-        "minecraft:diorite", "minecraft:granite", "minecraft:clay",
-    }
+    _NATURAL_BLOCKS = METRIC_NATURAL_BLOCKS
 
     def natural_terrain_fraction(self) -> float:
         hist = self.block_histogram()
