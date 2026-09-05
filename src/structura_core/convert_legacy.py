@@ -12,11 +12,16 @@ format documented in docs/milestone-1-plan.md.
 """
 import argparse
 import gzip
+import json
 import logging
+import re
 from pathlib import Path
 
 import amulet
-from amulet_nbt import CompoundTag, ListTag, IntTag, StringTag, NamedTag
+from amulet_nbt import (
+    ByteTag, CompoundTag, DoubleTag, IntTag, ListTag, NamedTag, StringTag,
+    load as load_nbt,
+)
 
 from .version import DATA_VERSION, JAVA_VERSION
 
@@ -345,6 +350,27 @@ def convert(
               f"{len(interior_air)} interior, "
               f"{len(door_air)} door-clearance (placed explicitly)")
 
+        legacy_root = load_nbt(str(src_path), compressed=True).compound
+        legacy_entities = _legacy_entities(legacy_root)
+        shifted_text = {
+            (tx - ox, ty - oy, tz - oz): lines
+            for (tx, ty, tz), lines in _legacy_tile_text(legacy_root).items()
+        }
+        restored = 0
+        for pos, _idx, entry_nbt in blocks:
+            lines = shifted_text.get(pos)
+            if lines is None or entry_nbt is None or "front_text" not in entry_nbt:
+                continue
+            front = entry_nbt["front_text"]
+            existing = [str(m) for m in front.get("messages", [])]
+            if any(json.loads(m).get("text", "").strip() for m in existing if m.startswith("{")):
+                continue
+            front["messages"] = ListTag([
+                StringTag(json.dumps({"text": line})) for line in lines
+            ])
+            restored += 1
+        print(f"    sign text restored: {restored}")
+
         # Build the structure NBT root compound.
         root = CompoundTag()
         root["DataVersion"] = IntTag(data_version)
@@ -361,7 +387,25 @@ def convert(
             blocks_tag.append(comp)
         root["blocks"] = blocks_tag
 
-        root["entities"] = ListTag()  # milestone 1: no entity migration yet
+        entities_tag = ListTag()
+        for (ex, ey, ez), payload in legacy_entities:
+            pos = (ex - ox, ey - oy, ez - oz)
+            if not all(0 <= v < limit for v, limit in zip(pos, (size_x, size_y, size_z))):
+                continue
+            nbt = CompoundTag({"id": StringTag(payload["id"])})
+            if "facing" in payload:
+                nbt["facing"] = ByteTag(payload["facing"])
+            if "variant" in payload:
+                nbt["variant"] = StringTag(payload["variant"])
+            for axis, value in zip(("TileX", "TileY", "TileZ"), pos):
+                nbt[axis] = IntTag(value)
+            entities_tag.append(CompoundTag({
+                "pos": ListTag([DoubleTag(v + 0.5) for v in pos]),
+                "blockPos": ListTag([IntTag(v) for v in pos]),
+                "nbt": nbt,
+            }))
+        root["entities"] = entities_tag
+        print(f"    entities carried: {len(entities_tag)}")
 
         destination = Path(dst_path)
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -377,6 +421,62 @@ def convert(
     finally:
         level.close()
 
+
+
+LEGACY_ENTITIES = {
+    "painting": "minecraft:painting",
+    "itemframe": "minecraft:item_frame",
+    "glowitemframe": "minecraft:glow_item_frame",
+}
+
+
+def _legacy_tile_text(root):
+    """Sign text keyed by the schematic's own coordinates.
+
+    Amulet translates a legacy sign into the modern shape -- front_text,
+    back_text, is_waxed -- and leaves its messages empty, so the container
+    arrives and the words do not. The original Text1..Text4 are still in the
+    file, so they are read from it directly rather than reconstructed.
+    """
+    found = {}
+    for entry in root.get("TileEntities") or []:
+        lines = [str(entry.get(f"Text{i}", "")) for i in range(1, 5)]
+        if not any(line.strip() for line in lines):
+            continue
+        try:
+            pos = tuple(int(str(entry[axis])) for axis in ("x", "y", "z"))
+        except KeyError:
+            continue
+        found[pos] = lines
+    return found
+
+
+def _legacy_entities(root):
+    """Paintings and item frames, keyed by the block they hang on.
+
+    Mobs are deliberately dropped: a pig that wandered into the selection is
+    not part of the build, and a structure that spawns livestock every time it
+    generates is worse than one that does not.
+    """
+    found = []
+    for entry in root.get("Entities") or []:
+        kind = LEGACY_ENTITIES.get(str(entry.get("id", "")).split(":")[-1].replace("_", "").lower())
+        if kind is None:
+            continue
+        try:
+            pos = tuple(int(str(entry[axis])) for axis in ("TileX", "TileY", "TileZ"))
+        except KeyError:
+            continue
+        payload = {"id": kind}
+        for source in ("Facing", "Direction"):
+            if source in entry:
+                payload["facing"] = int(str(entry[source])) % 4
+                break
+        if "Motive" in entry:
+            name = str(entry["Motive"]).split(":")[-1]
+            payload["variant"] = "minecraft:" + re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+        found.append((pos, payload))
+    return found
 
 def main():
     ap = argparse.ArgumentParser()
