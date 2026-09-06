@@ -1,7 +1,8 @@
-"""Validated reader and writer for vanilla Java Structure NBT files."""
-
+import gzip
+from collections.abc import Iterable, Mapping
+from io import BytesIO
 from pathlib import Path
-from typing import Iterable, Mapping, Tuple, Union
+from typing import Tuple, Union
 
 from amulet_nbt import (
     CompoundTag,
@@ -16,6 +17,23 @@ from amulet_nbt import (
 AIR_NAMES = frozenset({"minecraft:air", "minecraft:cave_air", "minecraft:void_air"})
 Position = Tuple[int, int, int]
 State = Union[int, str]
+
+
+def load_root(path):
+    data = Path(path).read_bytes()
+    return load_nbt(data, compressed=data.startswith(b"\x1f\x8b")).compound
+
+
+def write_root(root, path, compressed=True):
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    data = NamedTag(root, "").save_to(compressed=False)
+    if compressed:
+        output = BytesIO()
+        with gzip.GzipFile(fileobj=output, mode="wb", mtime=0) as stream:
+            stream.write(data)
+        data = output.getvalue()
+    destination.write_bytes(data)
 
 
 def state_key(entry: Mapping) -> str:
@@ -56,17 +74,35 @@ def parse_state(value: str) -> CompoundTag:
 class Structure:
     """In-memory Structure NBT with eagerly checked structural invariants."""
 
-    def __init__(self, path):
+    def __init__(self, path, palette_index=0):
         self.path = Path(path)
-        root = load_nbt(str(self.path), compressed=True).compound
-        self.data_version = int(root["DataVersion"].py_data)
-        self.size = tuple(int(value.py_data) for value in root["size"])
-        self.palette_raw = list(root["palette"])
+        root = load_root(self.path)
+        try:
+            self.data_version = int(root["DataVersion"].py_data)
+            self.size = tuple(int(value.py_data) for value in root["size"])
+            blocks = root["blocks"]
+        except (AttributeError, KeyError, TypeError, ValueError) as error:
+            raise ValueError(f"invalid structure header in {self.path}") from error
+        palettes = root.get("palettes")
+        if palettes is None:
+            if palette_index != 0 or "palette" not in root:
+                raise ValueError(
+                    f"palette {palette_index} is unavailable in {self.path}"
+                )
+            selected = root["palette"]
+        else:
+            if not 0 <= palette_index < len(palettes):
+                raise ValueError(
+                    f"palette {palette_index} is unavailable in {self.path}"
+                )
+            selected = palettes[palette_index]
+        self.palette_index = palette_index
+        self.palette_raw = list(selected)
         self.palette = [str(entry["Name"]) for entry in self.palette_raw]
         self.entities = list(root.get("entities", []))
         self.present = {}
         self.block_nbt = {}
-        for block in root["blocks"]:
+        for block in blocks:
             pos = tuple(int(value.py_data) for value in block["pos"])
             if pos in self.present:
                 raise ValueError(f"duplicate block position {pos} in {self.path}")
@@ -79,13 +115,17 @@ class Structure:
         if len(self.size) != 3 or any(value <= 0 for value in self.size):
             raise ValueError(f"invalid structure size {self.size} in {self.path}")
         for pos, index in self.present.items():
-            if len(pos) != 3 or not all(0 <= value < limit for value, limit in zip(pos, self.size)):
+            if len(pos) != 3 or not all(
+                0 <= value < limit for value, limit in zip(pos, self.size)
+            ):
                 raise ValueError(f"block {pos} is outside {self.size} in {self.path}")
             if not 0 <= index < len(self.palette):
                 raise ValueError(f"palette index {index} is invalid in {self.path}")
         dangling = self.block_nbt.keys() - self.present.keys()
         if dangling:
-            raise ValueError(f"block entities without blocks in {self.path}: {sorted(dangling)[:3]}")
+            raise ValueError(
+                f"block entities without blocks in {self.path}: {sorted(dangling)[:3]}"
+            )
 
     def name_at(self, pos):
         index = self.present.get(pos)
@@ -95,7 +135,11 @@ class Structure:
         return self.name_at(pos) in AIR_NAMES
 
     def solid_positions(self):
-        return {pos for pos, index in self.present.items() if self.palette[index] not in AIR_NAMES}
+        return {
+            pos
+            for pos, index in self.present.items()
+            if self.palette[index] not in AIR_NAMES
+        }
 
 
 def save_structure(
@@ -113,7 +157,9 @@ def save_structure(
         raise ValueError(f"invalid output size: {size}")
 
     palette = ListTag([CompoundTag(dict(item.items())) for item in src.palette_raw])
-    palette_index = {state_key(entry): index for index, entry in enumerate(src.palette_raw)}
+    palette_index = {
+        state_key(entry): index for index, entry in enumerate(src.palette_raw)
+    }
 
     def index_for(state):
         if isinstance(state, int):
@@ -147,7 +193,9 @@ def save_structure(
             )
 
     def require_bounds(pos):
-        if len(pos) != 3 or not all(0 <= value < limit for value, limit in zip(pos, size)):
+        if len(pos) != 3 or not all(
+            0 <= value < limit for value, limit in zip(pos, size)
+        ):
             raise ValueError(f"output block {pos} is outside {size}")
 
     blocks = ListTag()
@@ -159,10 +207,12 @@ def save_structure(
             target in addition_map and src.palette[index] in AIR_NAMES
         ):
             continue
-        block = CompoundTag({
-            "pos": ListTag([IntTag(value) for value in target]),
-            "state": IntTag(index),
-        })
+        block = CompoundTag(
+            {
+                "pos": ListTag([IntTag(value) for value in target]),
+                "state": IntTag(index),
+            }
+        )
         if pos in src.block_nbt:
             block["nbt"] = CompoundTag(dict(src.block_nbt[pos].items()))
         blocks.append(block)
@@ -172,35 +222,43 @@ def save_structure(
         require_bounds(pos)
         if pos in written:
             continue
-        blocks.append(CompoundTag({
-            "pos": ListTag([IntTag(value) for value in pos]),
-            "state": IntTag(index_for(state)),
-        }))
+        blocks.append(
+            CompoundTag(
+                {
+                    "pos": ListTag([IntTag(value) for value in pos]),
+                    "state": IntTag(index_for(state)),
+                }
+            )
+        )
         written.add(pos)
 
     entities = ListTag()
     for raw in src.entities:
         entity = CompoundTag(dict(raw.items()))
         if "blockPos" in entity:
-            entity["blockPos"] = ListTag([
-                IntTag(int(value.py_data) + delta)
-                for value, delta in zip(entity["blockPos"], shift)
-            ])
+            entity["blockPos"] = ListTag(
+                [
+                    IntTag(int(value.py_data) + delta)
+                    for value, delta in zip(entity["blockPos"], shift)
+                ]
+            )
         if "pos" in entity:
-            entity["pos"] = ListTag([
-                DoubleTag(float(value.py_data) + delta)
-                for value, delta in zip(entity["pos"], shift)
-            ])
+            entity["pos"] = ListTag(
+                [
+                    DoubleTag(float(value.py_data) + delta)
+                    for value, delta in zip(entity["pos"], shift)
+                ]
+            )
         entities.append(entity)
 
-    root = CompoundTag({
-        "DataVersion": IntTag(src.data_version),
-        "size": ListTag([IntTag(value) for value in size]),
-        "palette": palette,
-        "blocks": blocks,
-        "entities": entities,
-    })
-    destination = Path(dst)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    NamedTag(root, "").save_to(str(destination))
+    root = CompoundTag(
+        {
+            "DataVersion": IntTag(src.data_version),
+            "size": ListTag([IntTag(value) for value in size]),
+            "palette": palette,
+            "blocks": blocks,
+            "entities": entities,
+        }
+    )
+    write_root(root, dst)
     return len(blocks)

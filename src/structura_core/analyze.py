@@ -9,6 +9,7 @@ invented for this project -- see docstrings for the source. Nothing here
 replaces looking at a render eventually; it's a pre-filter to avoid looking
 at obviously-broken or obviously-boring pieces.
 """
+
 import argparse
 import json
 import math
@@ -32,6 +33,7 @@ def _sparkline(counts, y0, y1, width=40):
     ramp = " ▁▂▃▄▅▆▇█"
     return "".join(ramp[round(b / peak * (len(ramp) - 1))] for b in buckets)
 
+
 # Some pieces omit air entirely (legacy conversion), others list it
 # explicitly (hand-authored jigsaw pieces, to carve into terrain).
 # StructureAnalyzer normalizes both to "not present" so every metric below
@@ -45,10 +47,14 @@ class StructureAnalyzer:
         self.size = s.size
         self.palette = s.palette
         self.palette_raw = s.palette_raw
-        self.positions = {pos: idx for pos, idx in s.present.items()
-                           if s.palette[idx] not in AIR_NAMES}
-        self.air_positions = {pos for pos, idx in s.present.items()
-                               if s.palette[idx] in AIR_NAMES}
+        self.positions = {
+            pos: idx
+            for pos, idx in s.present.items()
+            if s.palette[idx] not in AIR_NAMES
+        }
+        self.air_positions = {
+            pos for pos, idx in s.present.items() if s.palette[idx] in AIR_NAMES
+        }
         self._components = None  # cached
         self._rooms = None  # cached
         self._label_cache = None  # cached: (labels, local_positions, count, sizes)
@@ -90,14 +96,21 @@ class StructureAnalyzer:
         from scipy import ndimage
 
         if not self.positions:
-            self._label_cache = (None, np.zeros((0, 3), dtype=np.int32), 0, np.array([0]))
+            self._label_cache = (
+                None,
+                np.zeros((0, 3), dtype=np.int32),
+                0,
+                np.array([0]),
+            )
             return self._label_cache
         positions = np.array(list(self.positions.keys()), dtype=np.int32)
         offset = positions.min(axis=0)
         local = positions - offset
         mask = np.zeros(tuple(local.max(axis=0) + 1), dtype=bool)
         mask[tuple(local.T)] = True
-        labels, count = ndimage.label(mask, structure=ndimage.generate_binary_structure(3, 3))
+        labels, count = ndimage.label(
+            mask, structure=ndimage.generate_binary_structure(3, 3)
+        )
         sizes = np.bincount(labels.ravel())
         self._label_cache = (labels, local, count, sizes)
         return self._label_cache
@@ -272,7 +285,8 @@ class StructureAnalyzer:
         reads very differently from one dense captured mass, same overall
         fraction."""
         natural_ys = [
-            pos[1] for pos, idx in self.positions.items()
+            pos[1]
+            for pos, idx in self.positions.items()
             if self.palette[idx] in self._NATURAL_BLOCKS
         ]
         if not natural_ys:
@@ -314,7 +328,9 @@ class StructureAnalyzer:
         local = positions - offset
         mask = np.zeros(tuple(local.max(axis=0) + 1), dtype=bool)
         mask[tuple(local.T)] = True
-        labels, count = ndimage.label(mask, structure=ndimage.generate_binary_structure(3, 1))
+        labels, count = ndimage.label(
+            mask, structure=ndimage.generate_binary_structure(3, 1)
+        )
         sizes = np.bincount(labels.ravel())[1:] if count else np.array([], dtype=int)
         self._rooms = sorted(sizes.tolist(), reverse=True)
         return self._rooms
@@ -377,29 +393,49 @@ class StructureAnalyzer:
     #  ahead of the live in-game rejection recorded in its notes. --------
 
     _WATER_BLOCKS = {
-        "minecraft:prismarine", "minecraft:prismarine_bricks",
-        "minecraft:dark_prismarine", "minecraft:sea_lantern",
-        "minecraft:kelp", "minecraft:kelp_plant", "minecraft:conduit",
-        "minecraft:tube_coral_block", "minecraft:brain_coral_block",
-        "minecraft:sponge", "minecraft:wet_sponge",
+        "minecraft:prismarine",
+        "minecraft:prismarine_bricks",
+        "minecraft:dark_prismarine",
+        "minecraft:sea_lantern",
+        "minecraft:kelp",
+        "minecraft:kelp_plant",
+        "minecraft:conduit",
+        "minecraft:tube_coral_block",
+        "minecraft:brain_coral_block",
+        "minecraft:sponge",
+        "minecraft:wet_sponge",
     }
     _NETHER_BLOCKS = {
-        "minecraft:netherrack", "minecraft:nether_bricks", "minecraft:blackstone",
-        "minecraft:basalt", "minecraft:soul_sand", "minecraft:soul_soil",
-        "minecraft:glowstone", "minecraft:magma_block", "minecraft:crimson_planks",
-        "minecraft:warped_planks", "minecraft:nether_wart_block", "minecraft:shroomlight",
+        "minecraft:netherrack",
+        "minecraft:nether_bricks",
+        "minecraft:blackstone",
+        "minecraft:basalt",
+        "minecraft:soul_sand",
+        "minecraft:soul_soil",
+        "minecraft:glowstone",
+        "minecraft:magma_block",
+        "minecraft:crimson_planks",
+        "minecraft:warped_planks",
+        "minecraft:nether_wart_block",
+        "minecraft:shroomlight",
     }
 
     def environment_fit(self) -> dict:
         hist = self.block_histogram()
         total = sum(hist.values()) or 1
         water = sum(n for name, n in hist.items() if name in self._WATER_BLOCKS) / total
-        nether = sum(n for name, n in hist.items() if name in self._NETHER_BLOCKS) / total
+        nether = (
+            sum(n for name, n in hist.items() if name in self._NETHER_BLOCKS) / total
+        )
         glass = sum(n for name, n in hist.items() if "glass" in name) / total
-        stone_family = sum(
-            n for name, n in hist.items()
-            if "stone" in name or "cobble" in name or "brick" in name
-        ) / total
+        stone_family = (
+            sum(
+                n
+                for name, n in hist.items()
+                if "stone" in name or "cobble" in name or "brick" in name
+            )
+            / total
+        )
         return {
             "water_material_fraction": round(water, 4),
             "nether_material_fraction": round(nether, 4),
@@ -412,12 +448,23 @@ class StructureAnalyzer:
     # ---- H. gameplay-relevant, not just geometric ----------------------
 
     _LIGHT_SOURCES = {
-        "minecraft:torch", "minecraft:wall_torch", "minecraft:soul_torch",
-        "minecraft:soul_wall_torch", "minecraft:lantern", "minecraft:soul_lantern",
-        "minecraft:glowstone", "minecraft:sea_lantern", "minecraft:jack_o_lantern",
-        "minecraft:campfire", "minecraft:soul_campfire", "minecraft:redstone_lamp",
-        "minecraft:shroomlight", "minecraft:beacon", "minecraft:end_rod",
-        "minecraft:ochre_froglight", "minecraft:verdant_froglight",
+        "minecraft:torch",
+        "minecraft:wall_torch",
+        "minecraft:soul_torch",
+        "minecraft:soul_wall_torch",
+        "minecraft:lantern",
+        "minecraft:soul_lantern",
+        "minecraft:glowstone",
+        "minecraft:sea_lantern",
+        "minecraft:jack_o_lantern",
+        "minecraft:campfire",
+        "minecraft:soul_campfire",
+        "minecraft:redstone_lamp",
+        "minecraft:shroomlight",
+        "minecraft:beacon",
+        "minecraft:end_rod",
+        "minecraft:ochre_froglight",
+        "minecraft:verdant_froglight",
         "minecraft:pearlescent_froglight",
     }
 
@@ -429,7 +476,11 @@ class StructureAnalyzer:
         interior is invisible to every geometric metric here but spawns
         hostile mobs the moment this piece is placed -- the one gameplay-
         correctness check this report was missing."""
-        lights = [pos for pos, idx in self.positions.items() if self.palette[idx] in self._LIGHT_SOURCES]
+        lights = [
+            pos
+            for pos, idx in self.positions.items()
+            if self.palette[idx] in self._LIGHT_SOURCES
+        ]
         if not lights or not self.air_positions:
             return len(lights), 0.0
         from scipy.spatial import cKDTree
@@ -463,21 +514,101 @@ class StructureAnalyzer:
 
     _MATERIAL_FAMILIES = (
         ("glass", ("glass",)),
-        ("wood", ("plank", "log", "wood", "oak", "spruce", "birch", "jungle",
-                   "acacia", "dark_oak", "mangrove", "cherry", "bamboo",
-                   "crimson", "warped")),
-        ("stone", ("stone", "cobble", "brick", "andesite", "diorite", "granite",
-                    "deepslate", "blackstone", "basalt", "sandstone", "quartz",
-                    "prismarine", "terracotta", "concrete", "netherrack")),
+        (
+            "wood",
+            (
+                "plank",
+                "log",
+                "wood",
+                "oak",
+                "spruce",
+                "birch",
+                "jungle",
+                "acacia",
+                "dark_oak",
+                "mangrove",
+                "cherry",
+                "bamboo",
+                "crimson",
+                "warped",
+            ),
+        ),
+        (
+            "stone",
+            (
+                "stone",
+                "cobble",
+                "brick",
+                "andesite",
+                "diorite",
+                "granite",
+                "deepslate",
+                "blackstone",
+                "basalt",
+                "sandstone",
+                "quartz",
+                "prismarine",
+                "terracotta",
+                "concrete",
+                "netherrack",
+            ),
+        ),
         ("metal", ("iron", "copper", "gold", "netherite", "chain")),
-        ("nature", ("leaves", "grass", "dirt", "sand", "gravel", "flower", "vine",
-                     "kelp", "coral", "mycelium", "podzol", "moss", "sapling",
-                     "fern", "bush", "crop", "wart", "mushroom", "lily_pad")),
-        ("functional", ("chest", "furnace", "door", "torch", "lantern", "_bed",
-                          "table", "shelf", "barrel", "smoker", "loom", "anvil",
-                          "brewing", "cauldron", "hopper", "dispenser", "dropper",
-                          "redstone", "lever", "button", "plate", "rail", "sign",
-                          "banner", "frame", "armor_stand")),
+        (
+            "nature",
+            (
+                "leaves",
+                "grass",
+                "dirt",
+                "sand",
+                "gravel",
+                "flower",
+                "vine",
+                "kelp",
+                "coral",
+                "mycelium",
+                "podzol",
+                "moss",
+                "sapling",
+                "fern",
+                "bush",
+                "crop",
+                "wart",
+                "mushroom",
+                "lily_pad",
+            ),
+        ),
+        (
+            "functional",
+            (
+                "chest",
+                "furnace",
+                "door",
+                "torch",
+                "lantern",
+                "_bed",
+                "table",
+                "shelf",
+                "barrel",
+                "smoker",
+                "loom",
+                "anvil",
+                "brewing",
+                "cauldron",
+                "hopper",
+                "dispenser",
+                "dropper",
+                "redstone",
+                "lever",
+                "button",
+                "plate",
+                "rail",
+                "sign",
+                "banner",
+                "frame",
+                "armor_stand",
+            ),
+        ),
     )
 
     def material_families(self) -> dict:
@@ -493,7 +624,11 @@ class StructureAnalyzer:
         for name, n in hist.items():
             base = name.split(":", 1)[-1]
             family = next(
-                (fam for fam, keys in self._MATERIAL_FAMILIES if any(k in base for k in keys)),
+                (
+                    fam
+                    for fam, keys in self._MATERIAL_FAMILIES
+                    if any(k in base for k in keys)
+                ),
                 "other",
             )
             totals[family] += n
@@ -505,7 +640,8 @@ class StructureAnalyzer:
         field or opening a render."""
         sx, sy, sz = report["size"]
         materials = ", ".join(
-            f"{fam} {pct}%" for fam, pct in list(report["material_families"].items())[:2]
+            f"{fam} {pct}%"
+            for fam, pct in list(report["material_families"].items())[:2]
         )
         angle = report["footprint_axis_deg"]
         aligned = "grid-aligned" if angle < 5 or angle > 85 else f"rotated {angle} deg"
@@ -570,29 +706,29 @@ class StructureAnalyzer:
         warnings = []
         if debris_fraction > 0.005:
             warnings.append(
-                f"debris: {len(comps)-1} disconnected component(s), "
-                f"{debris_fraction*100:.1f}% of blocks -- consider dropping"
+                f"debris: {len(comps) - 1} disconnected component(s), "
+                f"{debris_fraction * 100:.1f}% of blocks -- consider dropping"
             )
         if floating_fraction > 0.02:
             warnings.append(
-                f"floating: {floating_fraction*100:.1f}% of blocks have no "
+                f"floating: {floating_fraction * 100:.1f}% of blocks have no "
                 f"support chain to the floor plane -- check for a detached wing"
             )
         if self.density() < 0.02:
             warnings.append(
-                f"very low density ({self.density()*100:.2f}%) -- bounding box "
+                f"very low density ({self.density() * 100:.2f}%) -- bounding box "
                 f"likely still has untrimmed padding"
             )
         ntf = self.natural_terrain_fraction()
         if ntf > 0.15:
             warnings.append(
-                f"likely captured terrain: {ntf*100:.1f}% of blocks are natural "
+                f"likely captured terrain: {ntf * 100:.1f}% of blocks are natural "
                 f"material (dirt/grass/stone/...) -- check for an attached hill/tree"
             )
         bf = self.bedrock_fraction()
         if bf > 0.001:
             warnings.append(
-                f"bedrock: {bf*100:.1f}% of blocks -- almost never a deliberate "
+                f"bedrock: {bf * 100:.1f}% of blocks -- almost never a deliberate "
                 f"material choice, near-certain sign the selection reached the "
                 f"world floor (see [Obturonius]peakfortress, rejected live at 32.7%)"
             )
@@ -604,7 +740,8 @@ def main():
     ap.add_argument("path")
     ap.add_argument("--json", action="store_true")
     ap.add_argument(
-        "--histogram", action="store_true",
+        "--histogram",
+        action="store_true",
         help="print block name/count/percent instead of the full report",
     )
     args = ap.parse_args()

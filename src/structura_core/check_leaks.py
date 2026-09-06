@@ -15,14 +15,19 @@ def enclosed_pockets(structure):
         missing[pos] = False
 
     labels, count = ndimage.label(
-        missing, structure=ndimage.generate_binary_structure(3, 1),
+        missing,
+        structure=ndimage.generate_binary_structure(3, 1),
     )
     if count == 0:
         return []
     exterior = set()
     for face in (
-        labels[0], labels[-1], labels[:, 0], labels[:, -1],
-        labels[:, :, 0], labels[:, :, -1],
+        labels[0],
+        labels[-1],
+        labels[:, 0],
+        labels[:, -1],
+        labels[:, :, 0],
+        labels[:, :, -1],
     ):
         exterior.update(int(value) for value in np.unique(face) if value)
 
@@ -32,7 +37,9 @@ def enclosed_pockets(structure):
         if label in exterior or not sizes[label]:
             continue
         points = np.argwhere(labels == label)
-        result.append((int(sizes[label]), points.min(axis=0), points.max(axis=0), points[0]))
+        result.append(
+            (int(sizes[label]), points.min(axis=0), points.max(axis=0), points[0])
+        )
     result.sort(key=lambda item: item[0], reverse=True)
     return result
 
@@ -48,7 +55,7 @@ def main():
     structure = Structure(args.path)
     pockets = enclosed_pockets(structure)
     print(f"enclosed omitted-air pockets: {len(pockets)}")
-    for size, low, high, sample in pockets[:args.limit]:
+    for size, low, high, sample in pockets[: args.limit]:
         print(
             f"  size={size:4d}  bbox x[{low[0]},{high[0]}] "
             f"y[{low[1]},{high[1]}] z[{low[2]},{high[2]}] "

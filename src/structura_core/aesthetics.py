@@ -29,10 +29,12 @@ def silhouette(solid):
     if not occupied.size:
         return dict(bbox_fill=0.0, top_levels=0, aspect=0.0)
     lo, hi = occupied.min(axis=0), occupied.max(axis=0)
-    core = solid[lo[0]:hi[0] + 1, lo[1]:hi[1] + 1, lo[2]:hi[2] + 1]
+    core = solid[lo[0] : hi[0] + 1, lo[1] : hi[1] + 1, lo[2] : hi[2] + 1]
     footprint = core.any(axis=1)
     top = np.where(
-        footprint, core.shape[1] - 1 - np.argmax(core[:, ::-1, :], axis=1), -1,
+        footprint,
+        core.shape[1] - 1 - np.argmax(core[:, ::-1, :], axis=1),
+        -1,
     )
     span = hi - lo + 1
     return dict(
@@ -51,7 +53,9 @@ def flat_wall(solid):
                 continue
             labels, count = ndimage.label(plane)
             if count:
-                largest = max(largest, int(ndimage.sum(plane, labels, range(1, count + 1)).max()))
+                largest = max(
+                    largest, int(ndimage.sum(plane, labels, range(1, count + 1)).max())
+                )
     return round(largest / max(int(solid.sum()), 1), 3)
 
 
@@ -60,15 +64,20 @@ def longest_straight_run(solid):
     if not footprint.any():
         return dict(run_p95=0.0, run_max=0, over_limit=0.0)
     top = np.where(
-        footprint, solid.shape[1] - 1 - np.argmax(solid[:, ::-1, :], axis=1), -1,
+        footprint,
+        solid.shape[1] - 1 - np.argmax(solid[:, ::-1, :], axis=1),
+        -1,
     )
     runs = []
     for heights, mask in ((top, footprint), (top.T, footprint.T)):
         for row in range(heights.shape[0]):
             length = 1
             for column in range(1, heights.shape[1]):
-                same = (mask[row, column] and mask[row, column - 1]
-                        and heights[row, column] == heights[row, column - 1])
+                same = (
+                    mask[row, column]
+                    and mask[row, column - 1]
+                    and heights[row, column] == heights[row, column - 1]
+                )
                 if same:
                     length += 1
                 else:
@@ -112,8 +121,9 @@ def luminance(rgb):
 
 
 def palette_colour(counts, colors):
-    weighted = [(count, colors[name]) for name, count in counts.items()
-                if name in colors]
+    weighted = [
+        (count, colors[name]) for name, count in counts.items() if name in colors
+    ]
     if not weighted:
         return None
     total = sum(count for count, _ in weighted)
@@ -123,14 +133,17 @@ def palette_colour(counts, colors):
     sorted_values, sorted_weights = values[order], weights[order]
     cumulative = np.cumsum(sorted_weights)
     low = float(sorted_values[np.searchsorted(cumulative, 0.10)])
-    high = float(sorted_values[min(np.searchsorted(cumulative, 0.90),
-                                   len(sorted_values) - 1)])
-    warm = sum(weight for weight, (_, rgb) in zip(weights, weighted)
-               if rgb[0] > rgb[2])
+    high = float(
+        sorted_values[min(np.searchsorted(cumulative, 0.90), len(sorted_values) - 1)]
+    )
+    warm = sum(weight for weight, (_, rgb) in zip(weights, weighted) if rgb[0] > rgb[2])
     return dict(
         covered=round(total / max(sum(counts.values()), 1), 3),
         value_mean=round(float((values * weights).sum()), 1),
-        value_spread=round(float(np.sqrt((weights * (values - (values * weights).sum()) ** 2).sum())), 1),
+        value_spread=round(
+            float(np.sqrt((weights * (values - (values * weights).sum()) ** 2).sum())),
+            1,
+        ),
         value_range=round(high - low, 1),
         warm_share=round(float(warm), 3),
     )
@@ -164,12 +177,16 @@ def capture_tells(structure, solid):
         elif name.endswith("_log") or name.endswith("_stem"):
             logs += 1
     faces = dict(
-        x0=float(solid[0].mean()), x1=float(solid[-1].mean()),
-        z0=float(solid[:, :, 0].mean()), z1=float(solid[:, :, -1].mean()),
-        ylo=float(solid[:, 0, :].mean()), yhi=float(solid[:, -1, :].mean()),
+        x0=float(solid[0].mean()),
+        x1=float(solid[-1].mean()),
+        z0=float(solid[:, :, 0].mean()),
+        z1=float(solid[:, :, -1].mean()),
+        ylo=float(solid[:, 0, :].mean()),
+        yhi=float(solid[:, -1, :].mean()),
     )
     return dict(
-        leaves=leaves, logs=logs,
+        leaves=leaves,
+        logs=logs,
         orphan_canopy=bool(leaves > 40 and logs * 12 < leaves),
         faces={key: round(value, 3) for key, value in faces.items()},
         cut_faces=int(sum(1 for value in faces.values() if value > 0.15)),
@@ -189,16 +206,23 @@ HINT_CONFIDENCE = {
 
 
 def review_score(data):
-    return round(sum(HINT_CONFIDENCE.get(hint.split(":")[0], 0.5)
-                     for hint in flags(data)), 2)
+    return round(
+        sum(HINT_CONFIDENCE.get(hint.split(":")[0], 0.5) for hint in flags(data)), 2
+    )
 
 
 def flags(data):
     silhouette_data, palette, construction, capture = (
-        data["silhouette"], data["palette"], data["construction"], data["capture"])
+        data["silhouette"],
+        data["palette"],
+        data["construction"],
+        data["capture"],
+    )
     raised = []
-    if (silhouette_data["bbox_fill"] > BOX_FILL_LIMIT
-            and silhouette_data["top_levels"] <= BOX_LEVEL_LIMIT):
+    if (
+        silhouette_data["bbox_fill"] > BOX_FILL_LIMIT
+        and silhouette_data["top_levels"] <= BOX_LEVEL_LIMIT
+    ):
         raised.append("box-like: fills its bounding box with almost no roofline")
     colour = data.get("colour")
     if colour and colour["covered"] > 0.5 and colour["value_range"] < 30:
@@ -222,7 +246,9 @@ def report(path, colors=None):
     structure = Structure(path)
     solid = solid_mask(structure)
     return dict(
-        name=str(path), size=list(structure.size), blocks=int(solid.sum()),
+        name=str(path),
+        size=list(structure.size),
+        blocks=int(solid.sum()),
         silhouette=silhouette(solid),
         flat_wall=flat_wall(solid),
         terrain=longest_straight_run(solid),
@@ -252,17 +278,29 @@ def main():
         return
     sil, cons, cap = data["silhouette"], data["construction"], data["capture"]
     print(f"{data['name']}  {data['size']}  {data['blocks']} blocks")
-    print(f"  silhouette   bbox fill {sil['bbox_fill']:.3f}  top levels {sil['top_levels']}  aspect {sil['aspect']}")
+    print(
+        f"  silhouette   bbox fill {sil['bbox_fill']:.3f}  top levels {sil['top_levels']}  aspect {sil['aspect']}"
+    )
     print(f"  flat wall    largest coplanar patch {data['flat_wall']:.3f} of mass")
-    print(f"  terrain      runs p95 {data['terrain']['run_p95']} max {data['terrain']['run_max']} "
-          f"over {NATURAL_RUN_LIMIT}: {100 * data['terrain']['over_limit']:.1f}%")
-    print(f"  palette      {data['palette']['distinct']} blocks, top three {data['palette']['top_three']}")
-    print(f"  construction floating {cons['floating']} ({100 * cons['floating_share']:.1f}%), "
-          f"whisker columns {cons['whisker_columns']}, debris {cons['debris_components']}")
-    print(f"  capture      {cap['cut_faces']} box faces touched, orphan canopy: {cap['orphan_canopy']}")
+    print(
+        f"  terrain      runs p95 {data['terrain']['run_p95']} max {data['terrain']['run_max']} "
+        f"over {NATURAL_RUN_LIMIT}: {100 * data['terrain']['over_limit']:.1f}%"
+    )
+    print(
+        f"  palette      {data['palette']['distinct']} blocks, top three {data['palette']['top_three']}"
+    )
+    print(
+        f"  construction floating {cons['floating']} ({100 * cons['floating_share']:.1f}%), "
+        f"whisker columns {cons['whisker_columns']}, debris {cons['debris_components']}"
+    )
+    print(
+        f"  capture      {cap['cut_faces']} box faces touched, orphan canopy: {cap['orphan_canopy']}"
+    )
     raised = flags(data)
-    print(f"  review       score {review_score(data):.2f} "
-          f"({'nothing to look at' if not raised else str(len(raised)) + ' hint(s)'})")
+    print(
+        f"  review       score {review_score(data):.2f} "
+        f"({'nothing to look at' if not raised else str(len(raised)) + ' hint(s)'})"
+    )
     for flag in raised:
         print(f"               - {flag}")
 

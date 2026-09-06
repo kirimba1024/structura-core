@@ -5,13 +5,16 @@ cells immediately around it (both sides) are actually present as explicit
 air blocks -- vs. simply absent (which means "untouched", i.e. real terrain
 will show through there when placed in the world).
 """
+
 import argparse
 
 from .nbt import AIR_NAMES, Structure
 
 FACING_VEC = {
-    "north": (0, 0, -1), "south": (0, 0, 1),
-    "east": (1, 0, 0), "west": (-1, 0, 0),
+    "north": (0, 0, -1),
+    "south": (0, 0, 1),
+    "east": (1, 0, 0),
+    "west": (-1, 0, 0),
 }
 
 
@@ -47,7 +50,7 @@ def check(path, steps=2):
         return "air (explicit)" if name in AIR_NAMES else f"solid: {name}"
 
     problems = 0
-    for (x, y, z), facing, (dx, dy, dz) in doors:
+    for (x, y, z), facing, (dx, _, dz) in doors:
         print(f"door at {(x, y, z)} facing {facing}")
         for label, sign in (("outward", 1), ("inward", -1)):
             for step in range(1, steps + 1):

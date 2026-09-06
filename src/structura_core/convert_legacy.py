@@ -10,19 +10,22 @@ NBT format (only schematic/sponge_schem/construction/mcstructure) -- so we
 serialize the palette/blocks/entities ourselves, by hand, matching the
 format documented in docs/milestone-1-plan.md.
 """
+
 import argparse
-import gzip
 import json
 import logging
 import re
-from pathlib import Path
-
 import amulet
 from amulet_nbt import (
-    ByteTag, CompoundTag, DoubleTag, IntTag, ListTag, NamedTag, StringTag,
-    load as load_nbt,
+    ByteTag,
+    CompoundTag,
+    DoubleTag,
+    IntTag,
+    ListTag,
+    StringTag,
 )
 
+from .nbt import load_root, write_root
 from .version import DATA_VERSION, JAVA_VERSION
 
 # Blocks that are never a deliberate material choice in a curated
@@ -54,19 +57,46 @@ def block_to_state_compound(block):
 
 
 _PANE_BAR_DIRS = {
-    "east": (1, 0, 0), "west": (-1, 0, 0),
-    "north": (0, 0, -1), "south": (0, 0, 1),
+    "east": (1, 0, 0),
+    "west": (-1, 0, 0),
+    "north": (0, 0, -1),
+    "south": (0, 0, 1),
 }
 
 _NON_CONNECTING_NEIGHBORS = {
-    "sign", "wall_sign", "hanging_sign", "wall_hanging_sign",
-    "torch", "wall_torch", "soul_torch", "soul_wall_torch",
-    "redstone_torch", "redstone_wall_torch",
-    "banner", "wall_banner", "ladder", "lever", "button",
-    "pressure_plate", "carpet", "rail", "powered_rail",
-    "detector_rail", "activator_rail", "tripwire", "tripwire_hook",
-    "trapdoor", "door", "slab", "stairs", "bed", "flower_pot",
-    "campfire", "lantern", "skull", "head",
+    "sign",
+    "wall_sign",
+    "hanging_sign",
+    "wall_hanging_sign",
+    "torch",
+    "wall_torch",
+    "soul_torch",
+    "soul_wall_torch",
+    "redstone_torch",
+    "redstone_wall_torch",
+    "banner",
+    "wall_banner",
+    "ladder",
+    "lever",
+    "button",
+    "pressure_plate",
+    "carpet",
+    "rail",
+    "powered_rail",
+    "detector_rail",
+    "activator_rail",
+    "tripwire",
+    "tripwire_hook",
+    "trapdoor",
+    "door",
+    "slab",
+    "stairs",
+    "bed",
+    "flower_pot",
+    "campfire",
+    "lantern",
+    "skull",
+    "head",
 }
 
 
@@ -98,7 +128,9 @@ def _fix_pane_bar_connections(blocks, palette_list, palette_index):
                 continue
             npos = (pos[0] + dx, pos[1] + dy, pos[2] + dz)
             nidx = pos_to_idx.get(npos)
-            nname = str(palette_list[nidx]["Name"]) if nidx is not None else "minecraft:air"
+            nname = (
+                str(palette_list[nidx]["Name"]) if nidx is not None else "minecraft:air"
+            )
             want = "true" if _is_connectable_neighbor(nname) else "false"
             if str(props[direction]) != want:
                 changed[direction] = want
@@ -114,9 +146,13 @@ def _fix_pane_bar_connections(blocks, palette_list, palette_index):
         for direction, want in changed.items():
             new_props[direction] = StringTag(want)
         name = palette_list[idx]["Name"]
-        state_key = f"{name}[" + ",".join(
-            f"{k}={v}" for k, v in sorted((k, str(v)) for k, v in new_props.items())
-        ) + "]"
+        state_key = (
+            f"{name}["
+            + ",".join(
+                f"{k}={v}" for k, v in sorted((k, str(v)) for k, v in new_props.items())
+            )
+            + "]"
+        )
         new_idx = palette_index.get(state_key)
         if new_idx is None:
             new_idx = len(palette_list)
@@ -129,7 +165,9 @@ def _fix_pane_bar_connections(blocks, palette_list, palette_index):
     return new_blocks, len(fixes)
 
 
-def _split_exterior_interior_air(air_positions, solid_positions, size_x, size_y, size_z):
+def _split_exterior_interior_air(
+    air_positions, solid_positions, size_x, size_y, size_z
+):
     """Classify each air cell as "exterior" (open padding -- omit, so it
     doesn't carve craters into destination terrain) or "interior" (a real
     room -- place explicitly so it's hollowed out even when embedded in a
@@ -176,8 +214,10 @@ def _split_exterior_interior_air(air_positions, solid_positions, size_x, size_y,
 
 
 _DOOR_FACING = {
-    "north": (0, 0, -1), "south": (0, 0, 1),
-    "east": (1, 0, 0), "west": (-1, 0, 0),
+    "north": (0, 0, -1),
+    "south": (0, 0, 1),
+    "east": (1, 0, 0),
+    "west": (-1, 0, 0),
 }
 
 
@@ -224,6 +264,7 @@ def convert(
     data_version: int,
     target_version=JAVA_VERSION,
     quiet_errors: bool = True,
+    preserve_all_entities: bool = False,
 ):
     if len(target_version) != 3 or any(part < 0 for part in target_version):
         raise ValueError(f"invalid Java target version: {target_version!r}")
@@ -240,8 +281,8 @@ def convert(
         version = ("java", tuple(target_version))
 
         palette_index = {}  # blockstate-string -> index
-        palette_list = []   # CompoundTag list, in index order
-        blocks = []          # list of (pos, state_index, nbt_or_None)
+        palette_list = []  # CompoundTag list, in index order
+        blocks = []  # list of (pos, state_index, nbt_or_None)
         air_positions = set()
         block_entities_count = 0
         for x in range(minx, maxx):
@@ -263,7 +304,9 @@ def convert(
                     if block.base_name == "air":
                         air_positions.add(pos)
                         continue
-                    replacement = FORCED_REPLACEMENTS.get((block.namespace, block.base_name))
+                    replacement = FORCED_REPLACEMENTS.get(
+                        (block.namespace, block.base_name)
+                    )
                     if replacement is not None:
                         block = amulet.Block(*replacement)
                     if block.namespace == "universal_minecraft":
@@ -272,10 +315,17 @@ def convert(
                         )
 
                     state_key = f"{block.namespace}:{block.base_name}" + (
-                        "[" + ",".join(f"{k}={v}" for k, v in sorted(
-                            (k, (v.py_data if hasattr(v, 'py_data') else v))
-                            for k, v in block.properties.items()
-                        )) + "]" if block.properties else ""
+                        "["
+                        + ",".join(
+                            f"{k}={v}"
+                            for k, v in sorted(
+                                (k, (v.py_data if hasattr(v, "py_data") else v))
+                                for k, v in block.properties.items()
+                            )
+                        )
+                        + "]"
+                        if block.properties
+                        else ""
                     )
 
                     idx = palette_index.get(state_key)
@@ -291,6 +341,10 @@ def convert(
 
                     blocks.append((pos, idx, entry_nbt))
 
+        legacy_root = load_root(src_path)
+        legacy_entities = _legacy_entities(legacy_root, preserve_all_entities)
+        legacy_text = _legacy_tile_text(legacy_root)
+
         # Trim the bounding box to the actual building. The source
         # .schematic's WorldEdit selection is usually padded well beyond the
         # real structure (the original builder eyeballing a region), and
@@ -298,21 +352,46 @@ def convert(
         # dimension_padding both operate over the full declared footprint,
         # so a loose bounding box drags the terrain-blending staircase out
         # across empty margin where there's no building at all.
-        if not blocks:
-            raise ValueError(f"source contains no non-air blocks: {src_path}")
-
-        bx = [p[0] for p, _, _ in blocks]
-        by = [p[1] for p, _, _ in blocks]
-        bz = [p[2] for p, _, _ in blocks]
+        trim_positions = [p for p, _, _ in blocks]
+        if preserve_all_entities:
+            trim_positions.extend(
+                tuple(int(value // 1) for value in pos)
+                for pos, _payload in legacy_entities
+                if all(
+                    0 <= value < limit
+                    for value, limit in zip(pos, (size_x, size_y, size_z))
+                )
+            )
+        if not trim_positions:
+            raise ValueError(
+                f"source contains no renderable blocks or entities: {src_path}"
+            )
+        bx = [p[0] for p in trim_positions]
+        by = [p[1] for p in trim_positions]
+        bz = [p[2] for p in trim_positions]
         ox, oy, oz = min(bx), min(by), min(bz)
-        new_size_x, new_size_y, new_size_z = max(bx) - ox + 1, max(by) - oy + 1, max(bz) - oz + 1
-        if (ox, oy, oz) != (0, 0, 0) or (new_size_x, new_size_y, new_size_z) != (size_x, size_y, size_z):
-            print(f"    trimmed bounding box: {size_x}x{size_y}x{size_z} -> "
-                  f"{new_size_x}x{new_size_y}x{new_size_z} (offset {ox},{oy},{oz})")
-            blocks = [((x - ox, y - oy, z - oz), idx, nbt) for (x, y, z), idx, nbt in blocks]
+        new_size_x, new_size_y, new_size_z = (
+            max(bx) - ox + 1,
+            max(by) - oy + 1,
+            max(bz) - oz + 1,
+        )
+        if (ox, oy, oz) != (0, 0, 0) or (new_size_x, new_size_y, new_size_z) != (
+            size_x,
+            size_y,
+            size_z,
+        ):
+            print(
+                f"    trimmed bounding box: {size_x}x{size_y}x{size_z} -> "
+                f"{new_size_x}x{new_size_y}x{new_size_z} (offset {ox},{oy},{oz})"
+            )
+            blocks = [
+                ((x - ox, y - oy, z - oz), idx, nbt) for (x, y, z), idx, nbt in blocks
+            ]
             air_positions = {
-                (x - ox, y - oy, z - oz) for (x, y, z) in air_positions
-                if ox <= x <= ox + new_size_x - 1 and oy <= y <= oy + new_size_y - 1
+                (x - ox, y - oy, z - oz)
+                for (x, y, z) in air_positions
+                if ox <= x <= ox + new_size_x - 1
+                and oy <= y <= oy + new_size_y - 1
                 and oz <= z <= oz + new_size_z - 1
             }
             size_x, size_y, size_z = new_size_x, new_size_y, new_size_z
@@ -322,7 +401,9 @@ def convert(
         # enclosed pockets -- real rooms) is placed explicitly so those
         # rooms get hollowed out even when the piece lands partway inside a
         # hill and would otherwise show raw terrain poking through.
-        blocks, pane_fixes = _fix_pane_bar_connections(blocks, palette_list, palette_index)
+        blocks, pane_fixes = _fix_pane_bar_connections(
+            blocks, palette_list, palette_index
+        )
         if pane_fixes:
             print(f"    pane/bars connection fixes: {pane_fixes}")
 
@@ -332,8 +413,11 @@ def convert(
         )
 
         door_air = _door_clearance(
-            blocks, palette_list, (size_x, size_y, size_z),
-            solid_positions, interior_air,
+            blocks,
+            palette_list,
+            (size_x, size_y, size_z),
+            solid_positions,
+            interior_air,
         )
         air_to_place = interior_air | door_air
         if air_to_place:
@@ -346,15 +430,15 @@ def convert(
                 palette_list.append(comp)
             for pos in air_to_place:
                 blocks.append((pos, air_idx, None))
-        print(f"    air: {len(exterior_air)} exterior (omitted), "
-              f"{len(interior_air)} interior, "
-              f"{len(door_air)} door-clearance (placed explicitly)")
+        print(
+            f"    air: {len(exterior_air)} exterior (omitted), "
+            f"{len(interior_air)} interior, "
+            f"{len(door_air)} door-clearance (placed explicitly)"
+        )
 
-        legacy_root = load_nbt(str(src_path), compressed=True).compound
-        legacy_entities = _legacy_entities(legacy_root)
         shifted_text = {
             (tx - ox, ty - oy, tz - oz): lines
-            for (tx, ty, tz), lines in _legacy_tile_text(legacy_root).items()
+            for (tx, ty, tz), lines in legacy_text.items()
         }
         restored = 0
         for pos, _idx, entry_nbt in blocks:
@@ -363,11 +447,15 @@ def convert(
                 continue
             front = entry_nbt["front_text"]
             existing = [str(m) for m in front.get("messages", [])]
-            if any(json.loads(m).get("text", "").strip() for m in existing if m.startswith("{")):
+            if any(
+                json.loads(m).get("text", "").strip()
+                for m in existing
+                if m.startswith("{")
+            ):
                 continue
-            front["messages"] = ListTag([
-                StringTag(json.dumps({"text": line})) for line in lines
-            ])
+            front["messages"] = ListTag(
+                [StringTag(json.dumps({"text": line})) for line in lines]
+            )
             restored += 1
         print(f"    sign text restored: {restored}")
 
@@ -390,27 +478,15 @@ def convert(
         entities_tag = ListTag()
         for (ex, ey, ez), payload in legacy_entities:
             pos = (ex - ox, ey - oy, ez - oz)
-            if not all(0 <= v < limit for v, limit in zip(pos, (size_x, size_y, size_z))):
+            if not all(
+                0 <= v < limit for v, limit in zip(pos, (size_x, size_y, size_z))
+            ):
                 continue
-            nbt = CompoundTag({"id": StringTag(payload["id"])})
-            if "facing" in payload:
-                nbt["facing"] = ByteTag(payload["facing"])
-            if "variant" in payload:
-                nbt["variant"] = StringTag(payload["variant"])
-            for axis, value in zip(("TileX", "TileY", "TileZ"), pos):
-                nbt[axis] = IntTag(value)
-            entities_tag.append(CompoundTag({
-                "pos": ListTag([DoubleTag(v + 0.5) for v in pos]),
-                "blockPos": ListTag([IntTag(v) for v in pos]),
-                "nbt": nbt,
-            }))
+            entities_tag.append(_structure_entity(pos, payload))
         root["entities"] = entities_tag
         print(f"    entities carried: {len(entities_tag)}")
 
-        destination = Path(dst_path)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        raw = NamedTag(root, "").save_to(compressed=False)
-        destination.write_bytes(gzip.compress(raw, mtime=0))
+        write_root(root, dst_path)
 
         print(f"OK  {src_path}")
         print(f"    -> {dst_path}")
@@ -422,11 +498,95 @@ def convert(
         level.close()
 
 
-
 LEGACY_ENTITIES = {
     "painting": "minecraft:painting",
     "itemframe": "minecraft:item_frame",
     "glowitemframe": "minecraft:glow_item_frame",
+}
+
+LEGACY_ENTITY_ALIASES = {
+    **LEGACY_ENTITIES,
+    "areaeffectcloud": "minecraft:area_effect_cloud",
+    "armorstand": "minecraft:armor_stand",
+    "arrow": "minecraft:arrow",
+    "blaze": "minecraft:blaze",
+    "boat": "minecraft:boat",
+    "item": "minecraft:item",
+    "xporb": "minecraft:experience_orb",
+    "egg": "minecraft:egg",
+    "leashknot": "minecraft:leash_knot",
+    "snowball": "minecraft:snowball",
+    "fireball": "minecraft:fireball",
+    "smallfireball": "minecraft:small_fireball",
+    "enderpearl": "minecraft:ender_pearl",
+    "eyeofendersignal": "minecraft:eye_of_ender",
+    "potion": "minecraft:potion",
+    "thrownpotion": "minecraft:potion",
+    "xpbottle": "minecraft:experience_bottle",
+    "witherskull": "minecraft:wither_skull",
+    "tntprimed": "minecraft:tnt",
+    "fallingsand": "minecraft:falling_block",
+    "fireworksrocketentity": "minecraft:firework_rocket",
+    "spectralarrow": "minecraft:spectral_arrow",
+    "shulkerbullet": "minecraft:shulker_bullet",
+    "dragonfireball": "minecraft:dragon_fireball",
+    "endercrystal": "minecraft:end_crystal",
+    "fishhook": "minecraft:fishing_bobber",
+    "chicken": "minecraft:chicken",
+    "sheep": "minecraft:sheep",
+    "pig": "minecraft:pig",
+    "cow": "minecraft:cow",
+    "villager": "minecraft:villager",
+    "bat": "minecraft:bat",
+    "creeper": "minecraft:creeper",
+    "skeleton": "minecraft:skeleton",
+    "zombie": "minecraft:zombie",
+    "rabbit": "minecraft:rabbit",
+    "wolf": "minecraft:wolf",
+    "spider": "minecraft:spider",
+    "cavespider": "minecraft:cave_spider",
+    "squid": "minecraft:squid",
+    "slime": "minecraft:slime",
+    "lavaslime": "minecraft:magma_cube",
+    "silverfish": "minecraft:silverfish",
+    "enderman": "minecraft:enderman",
+    "endermite": "minecraft:endermite",
+    "guardian": "minecraft:guardian",
+    "elderguardian": "minecraft:elder_guardian",
+    "ghast": "minecraft:ghast",
+    "shulker": "minecraft:shulker",
+    "giant": "minecraft:giant",
+    "witch": "minecraft:witch",
+    "witherboss": "minecraft:wither",
+    "enderdragon": "minecraft:ender_dragon",
+    "pigzombie": "minecraft:zombified_piglin",
+    "husk": "minecraft:husk",
+    "stray": "minecraft:stray",
+    "witherskeleton": "minecraft:wither_skeleton",
+    "zombievillager": "minecraft:zombie_villager",
+    "skeletonhorse": "minecraft:skeleton_horse",
+    "zombiehorse": "minecraft:zombie_horse",
+    "evocationfangs": "minecraft:evoker_fangs",
+    "evocationillager": "minecraft:evoker",
+    "vindicationillager": "minecraft:vindicator",
+    "illusionillager": "minecraft:illusioner",
+    "vex": "minecraft:vex",
+    "mushroomcow": "minecraft:mooshroom",
+    "snowman": "minecraft:snow_golem",
+    "polarbear": "minecraft:polar_bear",
+    "llama": "minecraft:llama",
+    "llamaspit": "minecraft:llama_spit",
+    "parrot": "minecraft:parrot",
+    "ozelot": "minecraft:ocelot",
+    "entityhorse": "minecraft:horse",
+    "villagergolem": "minecraft:iron_golem",
+    "minecartrideable": "minecraft:minecart",
+    "minecartchest": "minecraft:chest_minecart",
+    "minecartfurnace": "minecraft:furnace_minecart",
+    "minecarttnt": "minecraft:tnt_minecart",
+    "minecarthopper": "minecraft:hopper_minecart",
+    "minecartspawner": "minecraft:spawner_minecart",
+    "minecartcommandblock": "minecraft:command_block_minecart",
 }
 
 
@@ -439,7 +599,10 @@ def _legacy_tile_text(root):
     file, so they are read from it directly rather than reconstructed.
     """
     found = {}
-    for entry in root.get("TileEntities") or []:
+    root = _schematic_root(root)
+    blocks = root.get("Blocks") if isinstance(root.get("Blocks"), CompoundTag) else root
+    entries = root.get("TileEntities") or blocks.get("BlockEntities") or []
+    for entry in entries:
         lines = [str(entry.get(f"Text{i}", "")) for i in range(1, 5)]
         if not any(line.strip() for line in lines):
             continue
@@ -451,32 +614,101 @@ def _legacy_tile_text(root):
     return found
 
 
-def _legacy_entities(root):
-    """Paintings and item frames, keyed by the block they hang on.
+def _schematic_root(root):
+    """Return the payload compound used by classic and Sponge schematics."""
+    nested = root.get("Schematic")
+    return nested if isinstance(nested, CompoundTag) else root
 
-    Mobs are deliberately dropped: a pig that wandered into the selection is
-    not part of the build, and a structure that spawns livestock every time it
-    generates is worse than one that does not.
+
+def _entity_data(entry):
+    """Merge Sponge's outer placement record with its Data/Extra payload."""
+    merged = CompoundTag(
+        {key: value for key, value in entry.items() if key not in ("Data", "Extra")}
+    )
+    for key in ("Data", "Extra"):
+        extra = entry.get(key)
+        if isinstance(extra, CompoundTag):
+            merged.update(extra)
+    return merged
+
+
+def _structure_entity(position, payload):
+    exact = payload.get("exact", False)
+    pos = tuple(float(value) for value in position)
+    placed = pos if exact else tuple(value + 0.5 for value in pos)
+    nbt = CompoundTag(dict(payload.get("nbt", {}).items()))
+    nbt["id"] = StringTag(payload["id"])
+    nbt["Pos"] = ListTag([DoubleTag(value) for value in placed])
+    if "facing" in payload:
+        nbt["Facing"] = ByteTag(payload["facing"])
+    if "variant" in payload:
+        nbt["variant"] = StringTag(payload["variant"])
+    if not exact:
+        for axis, value in zip(("TileX", "TileY", "TileZ"), pos):
+            nbt[axis] = IntTag(int(value))
+    return CompoundTag(
+        {
+            "pos": ListTag([DoubleTag(value) for value in placed]),
+            "blockPos": ListTag([IntTag(int(value // 1)) for value in pos]),
+            "nbt": nbt,
+        }
+    )
+
+
+def _legacy_entities(root, preserve_all=False):
+    """Entities selected for conversion, with exact positions for non-hangers.
+
+    World generation keeps its conservative decorations-only default. Render
+    conversion opts into every entity so a preview can show what the source
+    actually contains without changing the datapack policy.
     """
     found = []
+    root = _schematic_root(root)
     for entry in root.get("Entities") or []:
-        kind = LEGACY_ENTITIES.get(str(entry.get("id", "")).split(":")[-1].replace("_", "").lower())
+        data = _entity_data(entry)
+        legacy = str(data.get("id") or data.get("Id") or "").split(":")[-1]
+        key = legacy.replace("_", "").lower()
+        kind = (LEGACY_ENTITY_ALIASES if preserve_all else LEGACY_ENTITIES).get(key)
+        if kind is None and preserve_all and legacy:
+            snake = re.sub(r"(?<!^)(?=[A-Z])", "_", legacy).replace(".", "_").lower()
+            kind = f"minecraft:{snake}"
         if kind is None:
             continue
-        try:
-            pos = tuple(int(str(entry[axis])) for axis in ("TileX", "TileY", "TileZ"))
-        except KeyError:
-            continue
-        payload = {"id": kind}
-        for source in ("Facing", "Direction"):
-            if source in entry:
-                payload["facing"] = int(str(entry[source])) % 4
-                break
-        if "Motive" in entry:
-            name = str(entry["Motive"]).split(":")[-1]
-            payload["variant"] = "minecraft:" + re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+        hanging = key in LEGACY_ENTITIES
+        if hanging:
+            try:
+                pos = tuple(
+                    int(str(data[axis])) for axis in ("TileX", "TileY", "TileZ")
+                )
+            except KeyError:
+                try:
+                    pos = tuple(float(str(value)) for value in entry["Pos"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+        else:
+            try:
+                pos = tuple(float(str(value)) for value in entry["Pos"])
+            except (KeyError, TypeError, ValueError):
+                try:
+                    pos = tuple(float(str(value)) for value in data["Pos"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+        payload = {"id": kind, "exact": not hanging}
+        if preserve_all:
+            payload["nbt"] = data
+        if "Facing" in data:
+            payload["facing"] = int(str(data["Facing"])) % 6
+        elif "Direction" in data:
+            old_facing = int(str(data["Direction"])) % 4
+            payload["facing"] = (3, 4, 2, 5)[old_facing]
+        if "Motive" in data:
+            name = str(data["Motive"]).split(":")[-1]
+            payload["variant"] = (
+                "minecraft:" + re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+            )
         found.append((pos, payload))
     return found
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -484,7 +716,8 @@ def main():
     ap.add_argument("dst", help="output vanilla structure .nbt path")
     ap.add_argument("--data-version", type=int, default=DATA_VERSION)
     ap.add_argument(
-        "--target-version", default="1.21.1",
+        "--target-version",
+        default="1.21.1",
         help="Amulet block translation target, for example 1.21.1",
     )
     args = ap.parse_args()

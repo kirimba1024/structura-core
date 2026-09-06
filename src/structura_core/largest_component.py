@@ -1,5 +1,6 @@
 """Optional cleanup that keeps one connected solid component, or drops
 only confidently-tiny debris while leaving everything else untouched."""
+
 import argparse
 from collections import Counter
 
@@ -19,7 +20,8 @@ def _label_components(blocks):
     mask = np.zeros(tuple(local.max(axis=0) + 1), dtype=bool)
     mask[tuple(local.T)] = True
     labels, count = ndimage.label(
-        mask, structure=ndimage.generate_binary_structure(3, 3),
+        mask,
+        structure=ndimage.generate_binary_structure(3, 3),
     )
     sizes = np.bincount(labels.ravel())
     block_labels = labels[tuple(local.T)]
@@ -63,7 +65,9 @@ def drop_tiny_components(blocks, max_size):
     largest = int(np.argmax(sizes[1:]) + 1)
     keep_labels = {label for label in range(1, count + 1) if sizes[label] > max_size}
     keep_labels.add(largest)
-    keep = {tuple(p) for p, label in zip(positions, block_labels) if label in keep_labels}
+    keep = {
+        tuple(p) for p, label in zip(positions, block_labels) if label in keep_labels
+    }
     filtered = [block for block in blocks if block[0] in keep]
     return filtered, len(blocks) - len(filtered)
 
@@ -71,7 +75,8 @@ def drop_tiny_components(blocks, max_size):
 def clean_structure(src_path, dst_path, mode="largest", max_size=6, report_only=False):
     src = Structure(src_path)
     solids = [
-        (pos, index) for pos, index in src.present.items()
+        (pos, index)
+        for pos, index in src.present.items()
         if src.palette[index] not in AIR_NAMES
     ]
     if mode == "tiny":
@@ -86,7 +91,8 @@ def clean_structure(src_path, dst_path, mode="largest", max_size=6, report_only=
     if report_only:
         return
     src.present = {
-        pos: index for pos, index in src.present.items()
+        pos: index
+        for pos, index in src.present.items()
         if src.palette[index] in AIR_NAMES or pos in keep
     }
     src.block_nbt = {
@@ -107,17 +113,22 @@ def main():
     parser.add_argument("src")
     parser.add_argument("dst", nargs="?")
     parser.add_argument(
-        "--mode", choices=("largest", "tiny"), default="largest",
+        "--mode",
+        choices=("largest", "tiny"),
+        default="largest",
         help="'largest': keep only the single biggest component (blunt, "
-             "human-reviewed use only). 'tiny': drop only components at "
-             "or below --max-size, keep everything else (safe to automate).",
+        "human-reviewed use only). 'tiny': drop only components at "
+        "or below --max-size, keep everything else (safe to automate).",
     )
     parser.add_argument(
-        "--max-size", type=int, default=6,
+        "--max-size",
+        type=int,
+        default=6,
         help="mode=tiny: components at or below this many blocks are dropped",
     )
     parser.add_argument(
-        "--report-only", action="store_true",
+        "--report-only",
+        action="store_true",
         help="print what would be removed, write nothing",
     )
     args = parser.parse_args()
