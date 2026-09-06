@@ -5,7 +5,9 @@ from scipy import ndimage
 
 def dilation(mask, radius):
     return (
-        mask.copy() if radius <= 0 else ndimage.distance_transform_edt(~mask) <= radius
+        mask.copy()
+        if radius <= 0 or not mask.any()
+        else ndimage.distance_transform_edt(~mask) <= radius
     )
 
 
