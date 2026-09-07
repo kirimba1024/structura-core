@@ -9,6 +9,9 @@ import math
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional, Tuple
+
+from .nbt import PathInput
 
 from amulet_nbt import (
     CompoundTag,
@@ -20,7 +23,7 @@ from amulet_nbt import (
     StringTag,
 )
 
-from .limits import DEFAULT_MAX_BLOCKS
+from .limits import DEFAULT_MAX_BLOCKS, DEFAULT_MAX_NBT_BYTES
 from .limits import check_volume as _check_volume
 from .nbt import (
     AIR_NAMES,
@@ -159,13 +162,13 @@ class Litematic:
     block/entity view for rendering or conversion; it does not modify the file.
     """
 
-    def __init__(self, path):
+    def __init__(self, path: PathInput, *, max_nbt_bytes: int = DEFAULT_MAX_NBT_BYTES) -> None:
         self.path = Path(path)
-        self.root = load_root(path)
+        self.root = load_root(path, max_nbt_bytes=max_nbt_bytes)
         self._validate_header()
 
     @classmethod
-    def from_root(cls, root):
+    def from_root(cls, root: CompoundTag) -> "Litematic":
         result = cls.__new__(cls)
         result.path = Path("<memory>")
         result.root = deepcopy(root)
@@ -186,16 +189,16 @@ class Litematic:
             raise ValueError("Litematic Metadata must be a compound")
 
     @property
-    def region_names(self):
+    def region_names(self) -> Tuple[str, ...]:
         return tuple(self.root["Regions"])
 
-    def save(self, path):
+    def save(self, path: PathInput) -> Path:
         """Atomically save all native NBT, including fields unused by rendering."""
         self._validate_header()
         write_root(self.root, path)
         return Path(path)
 
-    def to_structure(self, *, region=None, max_blocks=DEFAULT_MAX_BLOCKS):
+    def to_structure(self, *, region: Optional[str] = None, max_blocks: int = DEFAULT_MAX_BLOCKS) -> Structure:
         """Read one named region or all disjoint regions into local coordinates.
 
         Overlapping regions are ambiguous and rejected, including air overlaps.
@@ -232,7 +235,8 @@ class Litematic:
         return result
 
 
-def export_litematic(src, destination, *, name=None, author="", max_blocks=DEFAULT_MAX_BLOCKS):
+def export_litematic(src: Structure, destination: PathInput, *, name: Optional[str] = None,
+                     author: str = "", max_blocks: int = DEFAULT_MAX_BLOCKS) -> Path:
     """Write the selected Structure palette as one Litematic region at (0,0,0).
 
     Missing cells become structure_void (Minecraft's no-placement marker).

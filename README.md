@@ -26,12 +26,41 @@ structura-analyze path/to/structure.nbt --json
 
 ## Native conversion
 
+Use the same conversion from Python or the command line:
+
+```python
+from structura_core import convert_structure
+
+output = convert_structure("house.nbt", "house.litematic")
+```
+
+The result is an absolute `Path`. A `Structure` object is also accepted and
+uses its active palette. Existing low-level functions remain available.
+Public entry points include type annotations and IDE completion information.
+
 ```bash
 structura-convert house.litematic house.nbt
 structura-convert house.nbt house.litematic
 structura-convert worldedit.schem house.litematic
 structura-convert house.litematic house.schem --region Main
 ```
+
+Conversions emit one `ConversionWarning` describing source data they omit,
+such as region names, nonzero offsets, biomes, alternative palettes or custom
+metadata. Only losses found in this input are reported. Use `strict=True` in
+Python or `--strict` in the CLI to reject reported loss before writing.
+An existing output survives strict rejection and serialization failure.
+CLI notices go to stderr; stdout remains the output path.
+
+```python
+convert_structure("house.schem", "native-copy.schem", strict=True)
+```
+
+Same-format Litematic/Sponge copies retain the entire native document and
+remain quiet, including unknown fields. Cross-format conversion cannot carry
+all native metadata. Strict mode checks the documented loss categories; it
+does not translate Minecraft versions or establish that every game-specific
+NBT payload has identical meaning in a different format.
 
 These commands need only the base package. Litematic is parsed directly with
 the existing NBT dependency. Litemapy is used to produce an interoperability
@@ -76,6 +105,13 @@ Native Litematic decoding and encoding default to at most 2,000,000 cells,
 checked before unpacking or allocating block arrays. Raise `max_blocks` in
 Python or `--max-blocks` in the converter for trusted larger files. This is an
 allocation guard, not a sandbox for arbitrary untrusted compressed files.
+
+All native file readers and `Structure.from_bytes` also limit input and
+decompressed NBT to 256 MiB each, before passing it to the NBT parser. Set
+`max_nbt_bytes` explicitly for trusted larger inputs; `structura-convert`
+exposes `--max-nbt-bytes`. The bound applies to raw and gzip NBT, including
+same-format document copies. Invalid/truncated NBT raises `ValueError`.
+This byte limit does not bound all parser allocations or total process memory.
 
 ## Sponge Schematic v2 and v3
 

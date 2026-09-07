@@ -1,0 +1,6 @@
+{
+  "include": ["checks/public_api.py"],
+  "typeCheckingMode": "strict",
+  "reportMissingTypeStubs": false,
+  "pythonVersion": "3.9"
+}

@@ -3,6 +3,9 @@
 import math
 from copy import deepcopy
 from pathlib import Path
+from typing import Tuple
+
+from .nbt import PathInput
 
 from amulet_nbt import (
     ByteArrayTag,
@@ -15,7 +18,7 @@ from amulet_nbt import (
     StringTag,
 )
 
-from .limits import DEFAULT_MAX_BLOCKS, check_volume
+from .limits import DEFAULT_MAX_BLOCKS, DEFAULT_MAX_NBT_BYTES, check_volume
 from .nbt import Structure, _integer, _vector, load_root, parse_state, write_root
 
 
@@ -93,13 +96,16 @@ def _list(values, tag=IntTag):
 class Schematic:
     """Retain native NBT, including offset, biomes, metadata and unknown fields."""
 
-    def __init__(self, path):
+    size: Tuple[int, int, int]
+    offset: Tuple[int, int, int]
+
+    def __init__(self, path: PathInput, *, max_nbt_bytes: int = DEFAULT_MAX_NBT_BYTES) -> None:
         self.path = Path(path)
-        self._document = load_root(path)
+        self._document = load_root(path, max_nbt_bytes=max_nbt_bytes)
         self._read_header()
 
     @classmethod
-    def from_root(cls, root):
+    def from_root(cls, root: CompoundTag) -> "Schematic":
         result = cls.__new__(cls)
         result.path = Path("<memory>")
         result._document = deepcopy(root)
@@ -123,13 +129,13 @@ class Schematic:
         self.offset = _vector(offset, "Schematic Offset")
         _compound(self.root.get("Metadata", CompoundTag()), "Schematic Metadata")
 
-    def save(self, path):
+    def save(self, path: PathInput) -> Path:
         """Save the native document atomically without cross-format data loss."""
         self._read_header()
         write_root(self._document, path, name="Schematic" if self.version == 2 and self.root is self._document else "")
         return Path(path)
 
-    def to_structure(self, *, max_blocks=DEFAULT_MAX_BLOCKS):
+    def to_structure(self, *, max_blocks: int = DEFAULT_MAX_BLOCKS) -> Structure:
         """Normalize local cells/entities; offset and biomes remain on this document."""
         self._read_header()
         volume = math.prod(self.size)

@@ -10,7 +10,7 @@ from amulet_nbt import (
     ShortTag, StringTag,
 )
 
-from .nbt import Structure, state_key, write_root
+from .nbt import PathInput, Structure, state_key, write_root
 
 
 def _encode_varints(values):
@@ -85,7 +85,7 @@ def schematic_root(src):
     })
 
 
-def export_schematic(src, destination):
+def export_schematic(src: Structure, destination: PathInput) -> Path:
     """Write a Sponge v2 file without requiring the legacy conversion extra."""
     destination = Path(destination)
     write_root(schematic_root(src), destination, name="Schematic")

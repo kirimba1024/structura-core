@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "structura-core"
-version = "0.4.0"
+version = "0.5.0"
 description = "Validated Minecraft Structure NBT, Litematic and Sponge I/O, conversion and voxel geometry"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -29,6 +29,9 @@ structura-check-leaks = "structura_core.check_leaks:main"
 where = ["src"]
 
 [project.urls]
+Documentation = "https://github.com/kirimba1024/structura-core#readme"
+Issues = "https://github.com/kirimba1024/structura-core/issues"
+Changelog = "https://github.com/kirimba1024/structura-core/blob/main/CHANGELOG.md"
 Repository = "https://github.com/kirimba1024/structura-core"
 
 [tool.ruff]
@@ -36,3 +39,6 @@ target-version = "py39"
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]
+
+[tool.setuptools.package-data]
+structura_core = ["py.typed", "*.pyi"]

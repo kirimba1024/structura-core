@@ -3,12 +3,16 @@ import math
 import os
 import re
 import tempfile
+import zlib
 from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from io import BytesIO
 from numbers import Integral, Real
 from pathlib import Path
-from typing import Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
+from os import PathLike
+
+from .limits import DEFAULT_MAX_NBT_BYTES
 
 from amulet_nbt import (
     CompoundTag,
@@ -16,11 +20,14 @@ from amulet_nbt import (
     IntTag,
     ListTag,
     NamedTag,
+    NBTLoadError,
     StringTag,
 )
 from amulet_nbt import (
     load as load_nbt,
 )
+
+PathInput = Union[str, PathLike[str]]
 
 AIR_NAMES = frozenset({"minecraft:air", "minecraft:cave_air", "minecraft:void_air"})
 Position = Tuple[int, int, int]
@@ -52,12 +59,42 @@ def _vector(values, label, *, integer=True):
     return tuple(float(value) for value in result)
 
 
-def load_root(path):
-    data = Path(path).read_bytes()
-    return load_nbt(data, compressed=data.startswith(b"\x1f\x8b")).compound
+def _check_byte_limit(limit):
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+        raise ValueError("max_nbt_bytes must be a positive integer")
 
 
-def write_root(root, path, compressed=True, *, name=""):
+def _bounded_read(stream, limit):
+    data = stream.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError(f"NBT data exceeds max_nbt_bytes={limit:,}")
+    return data
+
+
+def read_root(data: bytes, *, max_nbt_bytes: int = DEFAULT_MAX_NBT_BYTES) -> CompoundTag:
+    _check_byte_limit(max_nbt_bytes)
+    if len(data) > max_nbt_bytes:
+        raise ValueError(f"NBT input exceeds max_nbt_bytes={max_nbt_bytes:,}")
+    if data.startswith(b"\x1f\x8b"):
+        try:
+            with gzip.GzipFile(fileobj=BytesIO(data)) as stream:
+                data = _bounded_read(stream, max_nbt_bytes)
+        except (gzip.BadGzipFile, EOFError, zlib.error) as error:
+            raise ValueError("invalid gzip-compressed NBT") from error
+    try:
+        return load_nbt(data, compressed=False).compound
+    except (NBTLoadError, EOFError, TypeError) as error:
+        raise ValueError(f"invalid NBT: {error}") from error
+
+
+def load_root(path: PathInput, *, max_nbt_bytes: int = DEFAULT_MAX_NBT_BYTES) -> CompoundTag:
+    _check_byte_limit(max_nbt_bytes)
+    with Path(path).open("rb") as stream:
+        data = _bounded_read(stream, max_nbt_bytes)
+    return read_root(data, max_nbt_bytes=max_nbt_bytes)
+
+
+def write_root(root: CompoundTag, path: PathInput, compressed: bool = True, *, name: str = "") -> None:
     """Atomically write NBT, with reproducible gzip bytes when compressed."""
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -129,12 +166,22 @@ def _validate_palette(palette, label):
 class Structure:
     """In-memory Structure NBT with eagerly checked structural invariants."""
 
-    def __init__(self, path, palette_index=0):
+    path: Path
+    data_version: int
+    size: Position
+    palette_index: int
+    palette: List[str]
+    palettes_raw: List[List[CompoundTag]]
+    present: Dict[Position, int]
+    block_nbt: Dict[Position, CompoundTag]
+    entities: List[CompoundTag]
+
+    def __init__(self, path: PathInput, palette_index: int = 0, *, max_nbt_bytes: int = DEFAULT_MAX_NBT_BYTES) -> None:
         self.path = Path(path)
-        self._read(load_root(self.path), palette_index)
+        self._read(load_root(self.path, max_nbt_bytes=max_nbt_bytes), palette_index)
 
     @classmethod
-    def from_root(cls, root, palette_index=0):
+    def from_root(cls, root: CompoundTag, palette_index: int = 0) -> "Structure":
         """Read an owned copy of a Structure NBT compound without a temporary file."""
         result = cls.__new__(cls)
         result.path = Path("<memory>")
@@ -142,11 +189,11 @@ class Structure:
         return result
 
     @classmethod
-    def from_bytes(cls, data, palette_index=0):
+    def from_bytes(cls, data: bytes, palette_index: int = 0, *, max_nbt_bytes: int = DEFAULT_MAX_NBT_BYTES) -> "Structure":
         """Read raw or gzip-compressed NBT bytes."""
         result = cls.__new__(cls)
         result.path = Path("<memory>")
-        result._read(load_nbt(data, compressed=data.startswith(b"\x1f\x8b")).compound, palette_index)
+        result._read(read_root(data, max_nbt_bytes=max_nbt_bytes), palette_index)
         return result
 
     def _read(self, root, palette_index):
@@ -201,14 +248,14 @@ class Structure:
         self.validate()
 
     @property
-    def palette_raw(self):
+    def palette_raw(self) -> List[CompoundTag]:
         return self.palettes_raw[self.palette_index]
 
     @palette_raw.setter
-    def palette_raw(self, value):
+    def palette_raw(self, value: List[CompoundTag]) -> None:
         self.palettes_raw[self.palette_index] = value
 
-    def validate(self):
+    def validate(self) -> None:
         index = _integer(self.palette_index, "palette index")
         if not 0 <= index < len(self.palettes_raw):
             raise ValueError(f"palette {index} is unavailable in {self.path}")
@@ -245,14 +292,14 @@ class Structure:
             except KeyError as error:
                 raise ValueError(f"missing entity position in {self.path}") from error
 
-    def name_at(self, pos):
+    def name_at(self, pos: Position) -> Optional[str]:
         index = self.present.get(pos)
         return None if index is None else self.palette[index]
 
-    def is_air(self, pos):
+    def is_air(self, pos: Position) -> bool:
         return self.name_at(pos) in AIR_NAMES
 
-    def solid_positions(self):
+    def solid_positions(self) -> Set[Position]:
         return {
             pos
             for pos, index in self.present.items()
@@ -261,13 +308,13 @@ class Structure:
 
 
 def save_structure(
-    src,
-    dst,
-    size,
-    shift=(0, 0, 0),
+    src: Structure,
+    dst: PathInput,
+    size: Position,
+    shift: Position = (0, 0, 0),
     additions: Iterable[Tuple[Position, State]] = (),
     replacements: Iterable[Tuple[Position, State]] = (),
-):
+) -> None:
     """Save without discarding palettes or metadata.
 
     Additions preserve every authored cell, including air. String states are

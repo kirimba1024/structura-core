@@ -1,6 +1,7 @@
 """Allocation limits shared by native structure formats."""
 
 DEFAULT_MAX_BLOCKS = 2_000_000
+DEFAULT_MAX_NBT_BYTES = 256 * 1024 * 1024
 
 
 def check_volume(volume, limit):

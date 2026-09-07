@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0
+
+- Add typed `convert_structure(source, output, ...)`, used by the native CLI.
+  Keep native document copies lossless and retain existing conversion functions.
+- Report source-specific conversion losses with `ConversionWarning`; optional
+  `strict=True` / `--strict` rejects them before writing.
+- Bound input and decompressed NBT to 256 MiB by default, with an explicit
+  `max_nbt_bytes` override. Normalize malformed/truncated reads to `ValueError`.
+- Ship public type information and check a consumer against the installed wheel.
+  Add package documentation, issue and changelog links.
+
 ## 0.4.0
 
 - Read Sponge Schematic v2/v3 directly without Amulet Core. Preserve native

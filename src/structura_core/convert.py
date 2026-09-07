@@ -1,13 +1,66 @@
 """Convert native .nbt, .litematic and .schem inputs to .nbt, .litematic or Sponge .schem."""
 
 import argparse
+import math
+import warnings
+from os import PathLike
 from pathlib import Path
+from typing import Optional, Union
 
+from .conversion_losses import ConversionWarning, conversion_losses
 from .export_schematic import export_schematic
 from .formats import load_structure
-from .litematic import DEFAULT_MAX_BLOCKS, Litematic, export_litematic
-from .nbt import save_structure
+from .limits import DEFAULT_MAX_BLOCKS, DEFAULT_MAX_NBT_BYTES, check_volume
+from .litematic import Litematic, export_litematic
+from .nbt import Structure, save_structure
 from .schematic import Schematic
+
+
+def convert_structure(source: Union[str, PathLike[str], Structure], output: Union[str, PathLike[str]], *,
+                      region: Optional[str] = None, palette_index: int = 0, strict: bool = False,
+                      max_blocks: int = DEFAULT_MAX_BLOCKS,
+                      max_nbt_bytes: int = DEFAULT_MAX_NBT_BYTES) -> Path:
+    """Convert native formats; warn about data loss or reject it before writing with strict=True."""
+    output = Path(output).expanduser().resolve()
+    target = output.suffix.lower()
+    if target not in {".nbt", ".litematic", ".schem"}:
+        raise ValueError("output must end in .nbt, .litematic or .schem")
+    check_volume(0, max_blocks)
+    document = None
+    if isinstance(source, Structure):
+        if region is not None or palette_index != 0:
+            raise ValueError("region and palette_index apply to file inputs; Structure uses its active palette")
+        src = source
+    else:
+        source = Path(source).expanduser()
+        suffix = source.suffix.lower()
+        if suffix in {".litematic", ".schem"}:
+            if palette_index != 0 or (suffix == ".schem" and region is not None):
+                raise ValueError("palette_index applies only to Structure NBT; region only to Litematic")
+            reader = Litematic if suffix == ".litematic" else Schematic
+            document = reader(source, max_nbt_bytes=max_nbt_bytes)
+            if suffix == target and region is None:
+                return document.save(output)
+            src = (document.to_structure(region=region, max_blocks=max_blocks) if isinstance(document, Litematic)
+                   else document.to_structure(max_blocks=max_blocks))
+        else:
+            src = load_structure(source, region=region, palette_index=palette_index,
+                                 max_blocks=max_blocks, max_nbt_bytes=max_nbt_bytes)
+    losses = conversion_losses(document, src, target, region)
+    if target != ".nbt":
+        check_volume(math.prod(src.size), max_blocks)
+    if losses:
+        message = "Conversion omits: " + "; ".join(losses)
+        if strict:
+            raise ValueError(message)
+        warnings.warn(message, ConversionWarning, stacklevel=2)
+    if target == ".nbt":
+        save_structure(src, output, src.size)
+    elif target == ".litematic":
+        export_litematic(src, output, max_blocks=max_blocks)
+    else:
+        export_schematic(src, output)
+    return output
 
 
 def main(argv=None):
@@ -17,29 +70,16 @@ def main(argv=None):
     parser.add_argument("--region", help="one named Litematic region")
     parser.add_argument("--palette", type=int, default=0, help="Structure NBT palette index")
     parser.add_argument("--max-blocks", type=int, default=DEFAULT_MAX_BLOCKS)
+    parser.add_argument("--max-nbt-bytes", type=int, default=DEFAULT_MAX_NBT_BYTES)
+    parser.add_argument("--strict", action="store_true", help="reject data loss before writing")
     args = parser.parse_args(argv)
-    suffix = args.output.suffix.lower()
-    if suffix not in {".nbt", ".litematic", ".schem"}:
-        parser.error("output must end in .nbt, .litematic or .schem")
     try:
-        if args.src.suffix.lower() == suffix == ".litematic" and args.region is None:
-            if args.palette != 0:
-                parser.error("--palette applies only to Structure NBT")
-            Litematic(args.src).save(args.output)
-        elif args.src.suffix.lower() == suffix == ".schem":
-            if args.region is not None or args.palette != 0:
-                parser.error("Sponge input has one palette and no named regions")
-            Schematic(args.src).save(args.output)
-        else:
-            src = load_structure(args.src, region=args.region, palette_index=args.palette, max_blocks=args.max_blocks)
-            if suffix == ".nbt":
-                save_structure(src, args.output, src.size)
-            elif suffix == ".litematic":
-                export_litematic(src, args.output, max_blocks=args.max_blocks)
-            else:
-                if src.size[0] * src.size[1] * src.size[2] > args.max_blocks:
-                    raise ValueError("Sponge output volume exceeds --max-blocks")
-                export_schematic(src, args.output)
+        with warnings.catch_warnings(record=True) as notices:
+            warnings.simplefilter("always", ConversionWarning)
+            convert_structure(args.src, args.output, region=args.region, palette_index=args.palette,
+                              strict=args.strict, max_blocks=args.max_blocks, max_nbt_bytes=args.max_nbt_bytes)
+        for notice in notices:
+            parser._print_message(f"warning: {notice.message}\n")
     except (ValueError, OSError) as error:
         parser.error(str(error))
     print(args.output)

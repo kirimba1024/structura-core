@@ -89,4 +89,28 @@ jobs:
       - run: python -m pip install dist/*.whl pytest
       - run: python -m pip check
       - run: python -c "import importlib.util; assert importlib.util.find_spec('amulet') is None"
-      - run: python -m pytest -q tests/test_nbt.py tests/test_litematic.py tests/test_schematic.py tests/test_convert.py tests/test_export_schematic.py tests/test_voxel.py
+      - run: python -m pytest -q tests/test_nbt.py tests/test_litematic.py tests/test_schematic.py tests/test_convert.py tests/test_conversion_api.py tests/test_export_schematic.py tests/test_voxel.py
+
+  public-api:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - run: python -m pip install dist/*.whl pyright==1.1.411
+      - name: Check public types outside the source checkout
+        run: |
+          mkdir -p "$RUNNER_TEMP/structura-types/checks"
+          cp checks/public_api.py "$RUNNER_TEMP/structura-types/checks/"
+          cp pyrightconfig.json "$RUNNER_TEMP/structura-types/"
+          cd "$RUNNER_TEMP/structura-types"
+          pyright --pythonpath "$(which python)"
