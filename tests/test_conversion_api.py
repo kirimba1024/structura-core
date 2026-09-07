@@ -50,11 +50,11 @@ def test_strict_native_conversion_rejects_losses_without_touching_output(tmp_pat
 
 
 @pytest.mark.parametrize("fixture", ["signed-regions.litematic", "amulet-v2.schem", "amulet-v3.schem"])
-def test_strict_document_copy_is_lossless_and_quiet(tmp_path, fixture):
+def test_strict_document_copy_is_lossless_and_quiet(tmp_path, fixture, nbt_snapshot):
     source = FIXTURE.parent / fixture
     with warnings.catch_warnings(record=True) as notices:
         output = convert_structure(source, tmp_path / fixture, strict=True)
-    assert not notices and load_root(output) == load_root(source)
+    assert not notices and nbt_snapshot(load_root(output)) == nbt_snapshot(load_root(source))
 
 
 def test_only_present_losses_are_reported(tmp_path):

@@ -35,7 +35,7 @@ def bedrock_root():
     })
 
 
-def test_snbt_roundtrip_preserves_variants_metadata_entities_and_types(tmp_path):
+def test_snbt_roundtrip_preserves_variants_metadata_entities_and_types(tmp_path, nbt_snapshot):
     src = structure()
     src._root["custom"] = CompoundTag({"byte_array": ByteArrayTag([1, -2]), "int_array": IntArrayTag([3, 4]),
                                         "name": StringTag("Привет 🌍")})
@@ -47,7 +47,7 @@ def test_snbt_roundtrip_preserves_variants_metadata_entities_and_types(tmp_path)
     convert_structure(binary, text, strict=True)
     convert_structure(text, restored, strict=True)
     assert text.read_text(encoding="utf-8").startswith("{")
-    assert load_root(binary) == load_root(restored)
+    assert nbt_snapshot(load_root(binary)) == nbt_snapshot(load_root(restored))
     assert load_structure(text, palette_index=1).name_at((0, 0, 0)) == "minecraft:gold_block"
 
 
@@ -74,7 +74,7 @@ def test_snbt_nested_compounds_and_quoted_braces_are_complete(tmp_path):
     assert str(load_root(path)["nested"]["text"]) == 'braces } { and "quotes"'
 
 
-def test_sponge_v1_native_copy_and_explicit_source_version(tmp_path):
+def test_sponge_v1_native_copy_and_explicit_source_version(tmp_path, nbt_snapshot):
     root = CompoundTag({"Version": IntTag(1), "Width": ShortTag(1), "Height": ShortTag(1), "Length": ShortTag(1),
                         "Palette": CompoundTag({"minecraft:chest[facing=north]": IntTag(0)}),
                         "BlockData": ByteArrayTag([0]), "TileEntities": ListTag([CompoundTag({
@@ -84,7 +84,7 @@ def test_sponge_v1_native_copy_and_explicit_source_version(tmp_path):
     document = Schematic.from_root(root)
     document.save(source)
     convert_structure(source, copy, strict=True)
-    assert load_root(copy) == root
+    assert nbt_snapshot(load_root(copy)) == nbt_snapshot(root)
     with pytest.raises(ValueError, match="DataVersion"):
         load_structure(source)
     convert_structure(source, normalized, source_data_version=1343, strict=True)
@@ -97,7 +97,7 @@ def test_sponge_v1_native_copy_and_explicit_source_version(tmp_path):
         document.to_structure(data_version=3955)
 
 
-def test_native_bedrock_copy_preserves_unknown_data_utf8_and_layers(tmp_path):
+def test_native_bedrock_copy_preserves_unknown_data_utf8_and_layers(tmp_path, nbt_snapshot):
     root = bedrock_root()
     source, output = tmp_path / "in.mcstructure", tmp_path / "out.mcstructure"
     document = Mcstructure.from_root(root)
@@ -105,7 +105,7 @@ def test_native_bedrock_copy_preserves_unknown_data_utf8_and_layers(tmp_path):
     assert root == bedrock_root()
     Mcstructure.from_root(root).save(source)
     convert_structure(source, output, strict=True)
-    assert Mcstructure(output).root == root
+    assert nbt_snapshot(Mcstructure(output).root) == nbt_snapshot(root)
     assert source.read_bytes() == output.read_bytes()
 
 
