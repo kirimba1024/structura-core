@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0
+
+- Read Sponge Schematic v2/v3 directly without Amulet Core. Preserve native
+  document fields on save; normalize local blocks/entities with explicit
+  limits for cross-format conversion, offsets and biomes.
+- Add `Schematic` and `.schem` input to `load_structure` / `structura-convert`.
+  Validate VarInts, unsigned dimensions, sparse palette indices and entities.
+- Share cell limits across native formats and include independent Amulet
+  block fixtures for both Sponge versions in the source distribution.
+
 ## 0.3.0
 
 - Read Litematic v5–v7 natively, including signed region sizes, palettes crossing

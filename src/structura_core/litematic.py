@@ -20,6 +20,8 @@ from amulet_nbt import (
     StringTag,
 )
 
+from .limits import DEFAULT_MAX_BLOCKS
+from .limits import check_volume as _check_volume
 from .nbt import (
     AIR_NAMES,
     Structure,
@@ -31,7 +33,6 @@ from .nbt import (
     write_root,
 )
 
-DEFAULT_MAX_BLOCKS = 2_000_000
 _WORD_MASK = (1 << 64) - 1
 
 
@@ -53,13 +54,6 @@ def _compounds(tag, label):
     if not isinstance(tag, ListTag) or any(not isinstance(v, CompoundTag) for v in tag):
         raise ValueError(f"{label} must be a list of compounds")
     return tag
-
-
-def _check_volume(volume, limit):
-    if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
-        raise ValueError("max_blocks must be a positive integer")
-    if volume > limit:
-        raise ValueError(f"Litematic contains {volume:,} cells; max_blocks is {limit:,}")
 
 
 def _require_id(nbt, label):

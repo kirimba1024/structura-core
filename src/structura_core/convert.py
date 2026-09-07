@@ -1,4 +1,4 @@
-"""Convert native .nbt and .litematic inputs to .nbt, .litematic or Sponge .schem."""
+"""Convert native .nbt, .litematic and .schem inputs to .nbt, .litematic or Sponge .schem."""
 
 import argparse
 from pathlib import Path
@@ -7,6 +7,7 @@ from .export_schematic import export_schematic
 from .formats import load_structure
 from .litematic import DEFAULT_MAX_BLOCKS, Litematic, export_litematic
 from .nbt import save_structure
+from .schematic import Schematic
 
 
 def main(argv=None):
@@ -25,6 +26,10 @@ def main(argv=None):
             if args.palette != 0:
                 parser.error("--palette applies only to Structure NBT")
             Litematic(args.src).save(args.output)
+        elif args.src.suffix.lower() == suffix == ".schem":
+            if args.region is not None or args.palette != 0:
+                parser.error("Sponge input has one palette and no named regions")
+            Schematic(args.src).save(args.output)
         else:
             src = load_structure(args.src, region=args.region, palette_index=args.palette, max_blocks=args.max_blocks)
             if suffix == ".nbt":

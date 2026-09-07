@@ -1,1 +1,1 @@
-recursive-include tests/fixtures *.litematic *.py
+recursive-include tests/fixtures *.litematic *.schem *.py
