@@ -25,7 +25,7 @@ from amulet_nbt import (
     StringTag,
 )
 
-from .nbt import load_root, write_root
+from .nbt import _integer, load_root, write_root
 from .version import DATA_VERSION, JAVA_VERSION
 
 # Blocks that are never a deliberate material choice in a curated
@@ -265,14 +265,27 @@ def convert(
     target_version=JAVA_VERSION,
     quiet_errors: bool = True,
     preserve_all_entities: bool = False,
+    *,
+    prepare_for_placement: bool = True,
 ):
+    """Translate legacy input; optionally apply the established placement cleanup.
+
+    Set prepare_for_placement=False for previews or format conversion that must
+    retain the selection's size, air, authored materials and connections.
+    The historical default remains available for existing datapack pipelines.
+    """
+    data_version = _integer(data_version, "DataVersion")
     if len(target_version) != 3 or any(part < 0 for part in target_version):
         raise ValueError(f"invalid Java target version: {target_version!r}")
+    target_version = tuple(_integer(part, "Java version component") for part in target_version)
+    logger = logging.getLogger("amulet")
+    previous_level = logger.level
+    level = None
     if quiet_errors:
-        logging.getLogger("amulet").setLevel(logging.CRITICAL)
+        logger.setLevel(logging.CRITICAL)
 
-    level = amulet.load_level(src_path)
     try:
+        level = amulet.load_level(src_path)
         dim = level.dimensions[0]
         bounds = level.bounds(dim)
         (minx, miny, minz), (maxx, maxy, maxz) = bounds.min, bounds.max
@@ -301,13 +314,16 @@ def convert(
 
                     # universal air with stray legacy block_data properties
                     # (WorldEdit metadata leftovers) collapses to plain air.
-                    if block.base_name == "air":
-                        air_positions.add(pos)
-                        continue
+                    if block.base_name == "air" and block.namespace in {"minecraft", "universal_minecraft"}:
+                        if not prepare_for_placement:
+                            block = amulet.Block("minecraft", "air")
+                        else:
+                            air_positions.add(pos)
+                            continue
                     replacement = FORCED_REPLACEMENTS.get(
                         (block.namespace, block.base_name)
                     )
-                    if replacement is not None:
+                    if prepare_for_placement and replacement is not None:
                         block = amulet.Block(*replacement)
                     if block.namespace == "universal_minecraft":
                         raise ValueError(
@@ -337,6 +353,7 @@ def convert(
                     entry_nbt = None
                     if block_entity is not None:
                         entry_nbt = block_entity.nbt.compound.copy()
+                        entry_nbt["id"] = StringTag(block_entity.namespaced_name)
                         block_entities_count += 1
 
                     blocks.append((pos, idx, entry_nbt))
@@ -345,96 +362,98 @@ def convert(
         legacy_entities = _legacy_entities(legacy_root, preserve_all_entities)
         legacy_text = _legacy_tile_text(legacy_root)
 
-        # Trim the bounding box to the actual building. The source
-        # .schematic's WorldEdit selection is usually padded well beyond the
-        # real structure (the original builder eyeballing a region), and
-        # `size` isn't just cosmetic -- terrain_adaptation's skirt and
-        # dimension_padding both operate over the full declared footprint,
-        # so a loose bounding box drags the terrain-blending staircase out
-        # across empty margin where there's no building at all.
-        trim_positions = [p for p, _, _ in blocks]
-        if preserve_all_entities:
-            trim_positions.extend(
-                tuple(int(value // 1) for value in pos)
-                for pos, _payload in legacy_entities
-                if all(
-                    0 <= value < limit
-                    for value, limit in zip(pos, (size_x, size_y, size_z))
+        ox = oy = oz = 0
+        if prepare_for_placement:
+            # Trim the bounding box to the actual building. The source
+            # .schematic's WorldEdit selection is usually padded well beyond the
+            # real structure (the original builder eyeballing a region), and
+            # `size` isn't just cosmetic -- terrain_adaptation's skirt and
+            # dimension_padding both operate over the full declared footprint,
+            # so a loose bounding box drags the terrain-blending staircase out
+            # across empty margin where there's no building at all.
+            trim_positions = [p for p, _, _ in blocks]
+            if preserve_all_entities:
+                trim_positions.extend(
+                    tuple(int(value // 1) for value in pos)
+                    for pos, _payload in legacy_entities
+                    if all(
+                        0 <= value < limit
+                        for value, limit in zip(pos, (size_x, size_y, size_z))
+                    )
                 )
+            if not trim_positions:
+                raise ValueError(
+                    f"source contains no renderable blocks or entities: {src_path}"
+                )
+            bx = [p[0] for p in trim_positions]
+            by = [p[1] for p in trim_positions]
+            bz = [p[2] for p in trim_positions]
+            ox, oy, oz = min(bx), min(by), min(bz)
+            new_size_x, new_size_y, new_size_z = (
+                max(bx) - ox + 1,
+                max(by) - oy + 1,
+                max(bz) - oz + 1,
             )
-        if not trim_positions:
-            raise ValueError(
-                f"source contains no renderable blocks or entities: {src_path}"
+            if (ox, oy, oz) != (0, 0, 0) or (new_size_x, new_size_y, new_size_z) != (
+                size_x,
+                size_y,
+                size_z,
+            ):
+                print(
+                    f"    trimmed bounding box: {size_x}x{size_y}x{size_z} -> "
+                    f"{new_size_x}x{new_size_y}x{new_size_z} (offset {ox},{oy},{oz})"
+                )
+                blocks = [
+                    ((x - ox, y - oy, z - oz), idx, nbt) for (x, y, z), idx, nbt in blocks
+                ]
+                air_positions = {
+                    (x - ox, y - oy, z - oz)
+                    for (x, y, z) in air_positions
+                    if ox <= x <= ox + new_size_x - 1
+                    and oy <= y <= oy + new_size_y - 1
+                    and oz <= z <= oz + new_size_z - 1
+                }
+                size_x, size_y, size_z = new_size_x, new_size_y, new_size_z
+
+            # Air: exterior (open padding around the building) is omitted so it
+            # doesn't carve a crater into destination terrain; interior (fully
+            # enclosed pockets -- real rooms) is placed explicitly so those
+            # rooms get hollowed out even when the piece lands partway inside a
+            # hill and would otherwise show raw terrain poking through.
+            blocks, pane_fixes = _fix_pane_bar_connections(
+                blocks, palette_list, palette_index
             )
-        bx = [p[0] for p in trim_positions]
-        by = [p[1] for p in trim_positions]
-        bz = [p[2] for p in trim_positions]
-        ox, oy, oz = min(bx), min(by), min(bz)
-        new_size_x, new_size_y, new_size_z = (
-            max(bx) - ox + 1,
-            max(by) - oy + 1,
-            max(bz) - oz + 1,
-        )
-        if (ox, oy, oz) != (0, 0, 0) or (new_size_x, new_size_y, new_size_z) != (
-            size_x,
-            size_y,
-            size_z,
-        ):
+            if pane_fixes:
+                print(f"    pane/bars connection fixes: {pane_fixes}")
+
+            solid_positions = {pos for pos, _, _ in blocks}
+            exterior_air, interior_air = _split_exterior_interior_air(
+                air_positions, solid_positions, size_x, size_y, size_z
+            )
+
+            door_air = _door_clearance(
+                blocks,
+                palette_list,
+                (size_x, size_y, size_z),
+                solid_positions,
+                interior_air,
+            )
+            air_to_place = interior_air | door_air
+            if air_to_place:
+                air_idx = palette_index.get("minecraft:air")
+                if air_idx is None:
+                    air_idx = len(palette_list)
+                    palette_index["minecraft:air"] = air_idx
+                    comp = CompoundTag()
+                    comp["Name"] = StringTag("minecraft:air")
+                    palette_list.append(comp)
+                for pos in air_to_place:
+                    blocks.append((pos, air_idx, None))
             print(
-                f"    trimmed bounding box: {size_x}x{size_y}x{size_z} -> "
-                f"{new_size_x}x{new_size_y}x{new_size_z} (offset {ox},{oy},{oz})"
+                f"    air: {len(exterior_air)} exterior (omitted), "
+                f"{len(interior_air)} interior, "
+                f"{len(door_air)} door-clearance (placed explicitly)"
             )
-            blocks = [
-                ((x - ox, y - oy, z - oz), idx, nbt) for (x, y, z), idx, nbt in blocks
-            ]
-            air_positions = {
-                (x - ox, y - oy, z - oz)
-                for (x, y, z) in air_positions
-                if ox <= x <= ox + new_size_x - 1
-                and oy <= y <= oy + new_size_y - 1
-                and oz <= z <= oz + new_size_z - 1
-            }
-            size_x, size_y, size_z = new_size_x, new_size_y, new_size_z
-
-        # Air: exterior (open padding around the building) is omitted so it
-        # doesn't carve a crater into destination terrain; interior (fully
-        # enclosed pockets -- real rooms) is placed explicitly so those
-        # rooms get hollowed out even when the piece lands partway inside a
-        # hill and would otherwise show raw terrain poking through.
-        blocks, pane_fixes = _fix_pane_bar_connections(
-            blocks, palette_list, palette_index
-        )
-        if pane_fixes:
-            print(f"    pane/bars connection fixes: {pane_fixes}")
-
-        solid_positions = {pos for pos, _, _ in blocks}
-        exterior_air, interior_air = _split_exterior_interior_air(
-            air_positions, solid_positions, size_x, size_y, size_z
-        )
-
-        door_air = _door_clearance(
-            blocks,
-            palette_list,
-            (size_x, size_y, size_z),
-            solid_positions,
-            interior_air,
-        )
-        air_to_place = interior_air | door_air
-        if air_to_place:
-            air_idx = palette_index.get("minecraft:air")
-            if air_idx is None:
-                air_idx = len(palette_list)
-                palette_index["minecraft:air"] = air_idx
-                comp = CompoundTag()
-                comp["Name"] = StringTag("minecraft:air")
-                palette_list.append(comp)
-            for pos in air_to_place:
-                blocks.append((pos, air_idx, None))
-        print(
-            f"    air: {len(exterior_air)} exterior (omitted), "
-            f"{len(interior_air)} interior, "
-            f"{len(door_air)} door-clearance (placed explicitly)"
-        )
 
         shifted_text = {
             (tx - ox, ty - oy, tz - oz): lines
@@ -478,7 +497,7 @@ def convert(
         entities_tag = ListTag()
         for (ex, ey, ez), payload in legacy_entities:
             pos = (ex - ox, ey - oy, ez - oz)
-            if not all(
+            if prepare_for_placement and not all(
                 0 <= v < limit for v, limit in zip(pos, (size_x, size_y, size_z))
             ):
                 continue
@@ -495,7 +514,12 @@ def convert(
         print(f"    blocks written: {len(blocks)}")
         print(f"    block entities: {block_entities_count}")
     finally:
-        level.close()
+        try:
+            if level is not None:
+                level.close()
+        finally:
+            if quiet_errors:
+                logger.setLevel(previous_level)
 
 
 LEGACY_ENTITIES = {
@@ -666,15 +690,21 @@ def _legacy_entities(root, preserve_all=False):
     root = _schematic_root(root)
     for entry in root.get("Entities") or []:
         data = _entity_data(entry)
-        legacy = str(data.get("id") or data.get("Id") or "").split(":")[-1]
+        identifier = str(data.get("id") or data.get("Id") or "")
+        namespace, separator, legacy = identifier.partition(":")
+        if not separator:
+            legacy, namespace = namespace, ""
         key = legacy.replace("_", "").lower()
         kind = (LEGACY_ENTITY_ALIASES if preserve_all else LEGACY_ENTITIES).get(key)
+        custom = bool(namespace and namespace != "minecraft")
+        if custom:
+            kind = identifier if preserve_all else None
         if kind is None and preserve_all and legacy:
             snake = re.sub(r"(?<!^)(?=[A-Z])", "_", legacy).replace(".", "_").lower()
             kind = f"minecraft:{snake}"
         if kind is None:
             continue
-        hanging = key in LEGACY_ENTITIES
+        hanging = not custom and key in LEGACY_ENTITIES
         if hanging:
             try:
                 pos = tuple(
@@ -716,6 +746,11 @@ def main():
     ap.add_argument("dst", help="output vanilla structure .nbt path")
     ap.add_argument("--data-version", type=int, default=DATA_VERSION)
     ap.add_argument(
+        "--preserve-layout", action="store_true",
+        help="preserve selection bounds, air, materials and connections instead of placement cleanup",
+    )
+    ap.add_argument("--all-entities", action="store_true", help="retain every source entity")
+    ap.add_argument(
         "--target-version",
         default="1.21.1",
         help="Amulet block translation target, for example 1.21.1",
@@ -727,7 +762,11 @@ def main():
         ap.error("--target-version must contain three integers, for example 1.21.1")
     if len(target_version) != 3:
         ap.error("--target-version must contain three integers, for example 1.21.1")
-    convert(args.src, args.dst, args.data_version, target_version)
+    convert(
+        args.src, args.dst, args.data_version, target_version,
+        preserve_all_entities=args.all_entities,
+        prepare_for_placement=not args.preserve_layout,
+    )
 
 
 if __name__ == "__main__":

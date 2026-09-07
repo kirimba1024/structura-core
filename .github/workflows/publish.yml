@@ -5,26 +5,18 @@ on:
     types: [published]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.11"
-      - run: python -m pip install --upgrade build
-      - run: python -m build
-      - uses: actions/upload-artifact@v7
-        with:
-          name: dist
-          path: dist/
+  verify:
+    uses: ./.github/workflows/verify.yml
+    permissions:
+      contents: read
 
   publish:
-    needs: build
+    needs: verify
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
       id-token: write
+      contents: read
     steps:
       - uses: actions/download-artifact@v8
         with:

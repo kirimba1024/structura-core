@@ -1,94 +1,107 @@
-#!/usr/bin/env python3
-"""Export a vanilla Structure NBT to a Sponge Schematic v2 (.schem), for
-flying around it in Amulet Map Editor -- amulet-core has no NBT structure
-reader, only schem/construction/mcstructure, so it can't open our own
-Structure NBT files directly."""
+"""Export Structure NBT as Sponge Schematic v2, including entities."""
 
 import argparse
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
-from amulet.level.formats.sponge_schem.varint import encode_array
 from amulet_nbt import (
-    ByteArrayTag,
-    CompoundTag,
-    IntArrayTag,
-    IntTag,
-    ListTag,
-    NamedTag,
-    ShortTag,
-    StringTag,
+    ByteArrayTag, CompoundTag, DoubleTag, IntArrayTag, IntTag, ListTag,
+    ShortTag, StringTag,
 )
 
-from .nbt import Structure
+from .nbt import Structure, state_key, write_root
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("src")
-    parser.add_argument("dst")
-    args = parser.parse_args()
+def _encode_varints(values):
+    data = bytearray()
+    for value in values:
+        value = int(value)
+        while value > 127:
+            data.append((value & 127) | 128)
+            value >>= 7
+        data.append(value)
+    return bytes(data)
 
-    src = Structure(args.src)
+
+def schematic_root(src):
+    """Build a v2 payload using the selected palette; omitted cells become air.
+
+    Sponge has one palette and a dense block array. Other Structure palettes
+    and the distinction between omitted cells and air are not representable.
+    """
+    src.validate()
     sx, sy, sz = src.size
-
-    def blockstate(entry):
-        name = str(entry["Name"])
-        if "Properties" not in entry:
-            return name
-        props = ",".join(f"{k}={v}" for k, v in sorted(entry["Properties"].items()))
-        return f"{name}[{props}]"
+    if any(value > 65535 for value in src.size):
+        raise ValueError("Sponge v2 dimensions must fit an unsigned short (1..65535)")
 
     dedup_index = {}
     remap = []
     for entry in src.palette_raw:
-        key = blockstate(entry)
+        key = state_key(entry)
         remap.append(dedup_index.setdefault(key, len(dedup_index)))
 
-    air_key = "minecraft:air"
-    air_index = dedup_index.setdefault(air_key, len(dedup_index))
+    air_index = dedup_index.setdefault("minecraft:air", len(dedup_index))
     indices = np.full((sx, sy, sz), air_index, dtype=np.uint32)
     for pos, index in src.present.items():
         indices[pos] = remap[index]
-
-    block_data = encode_array(int(v) for v in np.transpose(indices, (1, 2, 0)).ravel())
-    palette = CompoundTag({key: IntTag(i) for key, i in dedup_index.items()})
+    # Sponge order is x + z * Width + y * Width * Length.
+    block_data = _encode_varints(np.transpose(indices, (1, 2, 0)).ravel())
 
     block_entities = ListTag()
     for pos, nbt in src.block_nbt.items():
         if "id" not in nbt:
-            continue
-        extra = CompoundTag({k: v for k, v in nbt.items() if k != "id"})
-        block_entities.append(
-            CompoundTag(
-                {
-                    "Id": StringTag(str(nbt["id"])),
-                    "Pos": IntArrayTag(list(pos)),
-                    "Extra": extra,
-                }
-            )
-        )
+            raise ValueError(f"block entity at {pos} has no id for Sponge export")
+        if not isinstance(nbt["id"], StringTag) or not str(nbt["id"]):
+            raise ValueError(f"block entity at {pos} needs a non-empty string id for Sponge export")
+        entry = deepcopy(nbt)
+        entry["Id"] = StringTag(str(entry.pop("id")))
+        entry["Pos"] = IntArrayTag(list(pos))
+        block_entities.append(entry)
 
-    root = CompoundTag(
-        {
-            "Version": IntTag(2),
-            "DataVersion": IntTag(src.data_version),
-            "Width": ShortTag(sx),
-            "Height": ShortTag(sy),
-            "Length": ShortTag(sz),
-            "Offset": IntArrayTag([0, 0, 0]),
-            "Palette": palette,
-            "PaletteMax": IntTag(len(dedup_index)),
-            "BlockData": ByteArrayTag(
-                np.frombuffer(block_data, dtype=np.uint8).astype(np.int8)
-            ),
-            "BlockEntities": block_entities,
-        }
-    )
-    destination = Path(args.dst)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    NamedTag(CompoundTag({"Schematic": root}), "").save_to(str(destination))
-    print(f"{args.dst} size={src.size} blocks={len(src.present)}")
+    entities = ListTag()
+    for record in src.entities:
+        entry = deepcopy(record["nbt"])
+        if "id" not in entry:
+            raise ValueError("entity has no id for Sponge export")
+        if not isinstance(entry["id"], StringTag) or not str(entry["id"]):
+            raise ValueError("entity needs a non-empty string id for Sponge export")
+        entry["Id"] = StringTag(str(entry.pop("id")))
+        entry["Pos"] = ListTag([DoubleTag(value.py_data) for value in record["pos"]])
+        entities.append(entry)
+
+    return CompoundTag({
+        "Version": IntTag(2),
+        "DataVersion": IntTag(src.data_version),
+        "Width": ShortTag(sx if sx < 32768 else sx - 65536),
+        "Height": ShortTag(sy if sy < 32768 else sy - 65536),
+        "Length": ShortTag(sz if sz < 32768 else sz - 65536),
+        "Offset": IntArrayTag([0, 0, 0]),
+        "Palette": CompoundTag({key: IntTag(i) for key, i in dedup_index.items()}),
+        "PaletteMax": IntTag(len(dedup_index)),
+        "BlockData": ByteArrayTag(np.frombuffer(block_data, dtype=np.int8)),
+        "BlockEntities": block_entities,
+        "Entities": entities,
+    })
+
+
+def export_schematic(src, destination):
+    """Write a Sponge v2 file without requiring the legacy conversion extra."""
+    destination = Path(destination)
+    write_root(schematic_root(src), destination, name="Schematic")
+    return destination
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("src")
+    parser.add_argument("dst")
+    parser.add_argument("--palette", type=int, default=0, help="Structure palette to export")
+    args = parser.parse_args()
+
+    src = Structure(args.src, palette_index=args.palette)
+    export_schematic(src, args.dst)
+    print(f"{args.dst} size={src.size} blocks={len(src.present)} entities={len(src.entities)}")
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "structura-core"
-version = "0.2.2"
+version = "0.2.3"
 description = "Validated Minecraft Structure NBT I/O, legacy conversion and voxel geometry"
 readme = "README.md"
 requires-python = ">=3.9"

@@ -266,9 +266,7 @@ class StructureAnalyzer:
         """Unlike dirt/stone/grass, bedrock is never a deliberate material
         choice in a curated build -- its only realistic source is a
         WorldEdit selection that reached all the way down to the world
-        floor. Found by inspecting a real rejected asset (2026-09-01,
-        [Obturonius]peakfortress -- rejected live as "ugly", turned out to
-        be 32.7% bedrock): a stronger, unambiguous version of the natural-
+        floor. This is a stronger, unambiguous version of the natural-
         terrain heuristic above, worth its own warning rather than being
         folded into that one fuzzier signal."""
         hist = self.block_histogram()
@@ -388,9 +386,7 @@ class StructureAnalyzer:
     # ---- G. environment fit -- material-palette voting, the same
     #  technique natural_terrain_fraction already uses, just against
     #  different curated block sets. A guess to narrow human/AI attention,
-    #  not a verdict -- e.g. this is the kind of signal that could have
-    #  flagged davegr_house_cave's mismatch (heavy glass/wood, low stone)
-    #  ahead of the live in-game rejection recorded in its notes. --------
+    #  not a verdict. ----------------------------------------------------
 
     _WATER_BLOCKS = {
         "minecraft:prismarine",
@@ -730,7 +726,7 @@ class StructureAnalyzer:
             warnings.append(
                 f"bedrock: {bf * 100:.1f}% of blocks -- almost never a deliberate "
                 f"material choice, near-certain sign the selection reached the "
-                f"world floor (see [Obturonius]peakfortress, rejected live at 32.7%)"
+                "world floor"
             )
         return warnings
 

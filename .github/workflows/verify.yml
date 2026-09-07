@@ -1,0 +1,92 @@
+name: Verify packages
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - run: python -m pip install build twine
+      - name: Check release version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python - <<'PYTHON'
+          import os, pathlib, tomllib
+          version = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"]
+          tag = os.environ.get("RELEASE_TAG")
+          if tag:
+              assert tag == f"v{version}", (tag, version)
+          PYTHON
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.9"
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: macos-latest
+            python: "3.11"
+          - os: windows-latest
+            python: "3.11"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - name: Install the built wheel and test tools
+        shell: bash
+        run: |
+          python -m pip install pytest ruff
+          python - <<'PYTHON'
+          import pathlib, subprocess, sys
+          wheel = next(pathlib.Path("dist").glob("*.whl"))
+          subprocess.check_call([sys.executable, "-m", "pip", "install", f"{wheel}[legacy]"])
+          PYTHON
+      - name: Check installed package location
+        run: python -c "import structura_core; assert 'site-packages' in structura_core.__file__, structura_core.__file__"
+      - run: python -m ruff check src tests
+      - run: python -m pytest -q tests
+
+  base:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - run: python -m pip install dist/*.whl pytest
+      - run: python -m pip check
+      - run: python -c "import importlib.util; assert importlib.util.find_spec('amulet') is None"
+      - run: python -m pytest -q tests/test_nbt.py tests/test_export_schematic.py tests/test_voxel.py
