@@ -46,7 +46,7 @@ def test_snbt_roundtrip_preserves_variants_metadata_entities_and_types(tmp_path)
     convert_structure(src, binary, strict=True)
     convert_structure(binary, text, strict=True)
     convert_structure(text, restored, strict=True)
-    assert text.read_text().startswith("{")
+    assert text.read_text(encoding="utf-8").startswith("{")
     assert load_root(binary) == load_root(restored)
     assert load_structure(text, palette_index=1).name_at((0, 0, 0)) == "minecraft:gold_block"
 
