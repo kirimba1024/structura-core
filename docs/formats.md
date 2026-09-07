@@ -1,7 +1,7 @@
-# Additional structure formats
+# Format recipes
 
-All examples use the same validated documents and atomic file writes as the
-existing converter. Native I/O does not require Amulet Core.
+[Format table](https://github.com/kirimba1024/structura-core#formats)
+· [Conversion guide](guide.md)
 
 ## SNBT: readable structure data
 
@@ -10,18 +10,10 @@ structura-convert house.nbt house.snbt --strict
 structura-convert house.snbt restored.nbt --strict
 ```
 
-```python
-from structura_core import convert_structure, load_structure
-
-structure = load_structure("house.snbt", max_nbt_bytes=8_000_000)
-convert_structure(structure, "restored.nbt", strict=True)
-```
-
-SNBT is UTF-8 text containing a Java Structure compound. NBT tag types,
-palette variants, entities and unknown fields survive NBT/SNBT round trips.
-The same byte limit applies before parsing text. Large structures produce
-large text files; use binary NBT for distribution. This is not canonical
-semantic diffing: palette order and block-record order are retained.
+SNBT is UTF-8 Java Structure NBT text. Round trips retain tag types, palettes,
+entities and unknown fields; record/palette order is not canonicalized.
+`load_structure("house.snbt", max_nbt_bytes=8_000_000)` bounds text before
+parsing. Binary NBT is more compact for distribution.
 
 ## Sponge v1: keep the source version explicit
 
@@ -30,12 +22,10 @@ structura-convert old.schem native-copy.schem --strict
 structura-convert old.schem normalized.nbt --source-data-version 1343 --strict
 ```
 
-The second example assumes the source really is Java 1.12.2 (DataVersion 1343).
-Choose the version of the source, not the version you want to run. Assigning
-a DataVersion does not translate old block states. Native copies preserve the
-document without needing this information. The v1 reader handles local
-palettes, VarInt arrays and TileEntities; global numeric registries are
-unsupported. An explicit DataVersion cannot contradict one already present.
+1343 means the source is Java 1.12.2; declaring it does not translate states.
+It cannot contradict a DataVersion already present. Native copies need no
+version declaration. The reader supports local palettes, VarInts and
+TileEntities; global numeric registries are unsupported.
 
 ## Bedrock: native documents and optional block translation
 
@@ -47,12 +37,10 @@ print(document.size, document.origin)
 document.save("native-copy.mcstructure")
 ```
 
-Native copies retain both block layers, entities, block-position data, origin,
-unknown fields and UTF-8 strings. The format must be version 1, use the default
-palette, and contain two correctly sized index arrays. The default limit is
-2,000,000 cells and 256 MiB of input/decompressed NBT.
-
-Install translation only when needed:
+Base-package copies retain both block layers, entities, block-position data,
+origin, unknown fields and UTF-8 strings. Input must be format v1 with the
+default palette and two correctly sized index arrays. Native copies do not
+upgrade versions; the [standard input guards](guide.md#allocation-guards) apply.
 
 ```bash
 pip install 'structura-core[bedrock]'
@@ -60,36 +48,19 @@ structura-convert house.nbt house.mcstructure --target-version 1.21.0
 structura-convert house.mcstructure house.nbt --target-version 1.21.0
 ```
 
-`--target-version` selects a schema for the destination edition, and must be
-an exact schema available in the installed PyMCTranslate database. The default
-is 1.21.0. Java output receives the selected schema's DataVersion. Input Java
-DataVersions select the latest known schema not newer than the source;
-versions beyond the database's coverage are rejected. Bedrock input uses the
-version recorded in each block-palette entry. Pre-1.13 numeric Bedrock blocks
-are outside the translation contract.
+Python: `load_structure(path, target_version=(1, 21, 0), strict=True)` or
+`convert_structure(source, output, target_version=(1, 21, 0), strict=True)`.
 
-```python
-from structura_core import convert_structure, load_structure
+| Translation rule | Contract |
+|---|---|
+| Target | Defaults to 1.21.0; must exactly match a destination schema in installed PyMCTranslate. Java output receives its DataVersion. |
+| Source | Java uses the latest known schema no newer than its DataVersion; future versions are rejected. Bedrock uses each palette entry's version. Pre-1.13 numeric blocks are unsupported. |
+| Blocks | Known vanilla states and waterlogging; missing cells remain absent, authored air remains air. Normalized coordinates are local; `source_origin` retains origin. |
+| Reported losses | Ordinary entities are omitted. Block NBT has a fidelity warning. Changed round-trip states, dropped secondary layers and missing neighbour context are reported. |
+| Rejected cases | Unknown blocks/properties, unsupported block-to-entity conversion and neighbour-dependent operations across mixed Bedrock schemas. |
 
-structure = load_structure("house.mcstructure", target_version=(1, 21, 0), strict=True)
-convert_structure(structure, "house.mcstructure", target_version=(1, 21, 0), strict=True)
-```
-
-Translation currently targets known vanilla blocks, including waterlogging.
-Missing cells remain absent and explicit air remains air. Coordinates in the
-normalized Java structure are local; `source_origin` retains the Bedrock origin.
-Native Bedrock copies do not upgrade game versions.
-
-`ConversionWarning` reports approximations; `strict=True` rejects them before
-publishing output. Ordinary entities are omitted because the translation
-dependency has no entity database. Block-entity payloads are translated with
-an explicit fidelity warning, including custom data that might not survive.
-Block states changed by a translation round trip, dropped secondary layers
-and missing neighbour context are also reported. Unknown blocks/properties,
-unsupported block-to-entity conversions and neighbour-dependent operations
-across mixed Bedrock schemas fail explicitly. Arbitrary Java/Bedrock conversion
-is not lossless, and these files have not been validated by launching Bedrock.
-
-The adapter uses the existing Amulet/PyMCTranslate data; no translation tables
-or game resources are bundled. The small interoperability fixture is generated
-independently by `tests/fixtures/generate_bedrock.py` using Amulet Core.
+`ConversionWarning` reports approximations; strict mode rejects them before
+publishing output. Arbitrary Java/Bedrock conversion is not lossless. Fixtures
+are independently generated by Amulet Core, but have not been checked in-game.
+The adapter reuses Amulet/PyMCTranslate; no game resources or translation tables
+are bundled.
