@@ -16,7 +16,7 @@ def _fields(mapping, retained):
     return shown + (f" (+{len(names) - 5} more)" if len(names) > 5 else "")
 
 
-def conversion_losses(document, src, target, region):
+def document_losses(document, region):
     losses = []
     if isinstance(document, Litematic):
         names = document.region_names if region is None else (region,)
@@ -42,7 +42,7 @@ def conversion_losses(document, src, target, region):
             losses.append("Sponge document metadata")
         unknown = _fields(root, (
             "Version", "DataVersion", "Width", "Height", "Length", "Offset", "Metadata",
-            "Blocks", "Palette", "PaletteMax", "BlockData", "BlockEntities", "Entities",
+            "Blocks", "Palette", "PaletteMax", "BlockData", "BlockEntities", "TileEntities", "Entities",
             "Biomes", "BiomeData", "BiomePalette", "BiomePaletteMax",
         ))
         if unknown:
@@ -57,6 +57,11 @@ def conversion_losses(document, src, target, region):
                 for record in records
             ):
                 losses.append("additional Sponge v3 container fields")
+    return losses
+
+
+def conversion_losses(document, src, target, region):
+    losses = document_losses(document, region)
     if any(getattr(src, "source_origin", (0, 0, 0))):
         losses.append(f"source origin/offset {src.source_origin}")
     if target == ".nbt":
@@ -71,9 +76,11 @@ def conversion_losses(document, src, target, region):
     if any(_fields(record, ("pos", "blockPos", "nbt")) or tuple(int(v) for v in record["blockPos"]) !=
            tuple(math.floor(float(v)) for v in record["pos"]) for record in src.entities):
         losses.append("Structure entity-record fields or independent blockPos")
+    if target == ".mcstructure" and any(src.palette[index] == "minecraft:structure_void" for index in src.present.values()):
+        losses.append("explicit structure_void cells become omitted cells")
     if target == ".schem":
         if len(src.present) < math.prod(src.size):
             losses.append(f"{math.prod(src.size) - len(src.present)} omitted cell(s) become air")
-        if any(_fields(entry, ("Name", "Properties")) for entry in src.palette_raw):
-            losses.append("additional palette-entry fields")
+    if target in {".schem", ".mcstructure"} and any(_fields(entry, ("Name", "Properties")) for entry in src.palette_raw):
+        losses.append("additional palette-entry fields")
     return losses

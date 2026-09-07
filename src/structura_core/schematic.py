@@ -1,9 +1,9 @@
-"""Native Sponge Schematic v2/v3 documents and normalized block/entity views."""
+"""Native Sponge documents and normalized block/entity views."""
 
 import math
 from copy import deepcopy
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 
 from .nbt import PathInput
 
@@ -25,7 +25,11 @@ from .nbt import Structure, _integer, _vector, load_root, parse_state, write_roo
 class UnsupportedSchematicVersion(ValueError):
     def __init__(self, version):
         self.version = version
-        super().__init__(f"unsupported Sponge version {version}; expected 2 or 3")
+        super().__init__(f"unsupported Sponge version {version}; expected 1, 2 or 3")
+
+
+class MissingSchematicDataVersion(ValueError):
+    pass
 
 
 def _compound(value, label):
@@ -116,9 +120,10 @@ class Schematic:
         document = _compound(self._document, "Schematic document")
         self.root = _compound(document.get("Schematic", document), "Schematic")
         self.version = _integer(self.root.get("Version"), "Schematic Version")
-        if self.version not in (2, 3):
+        if self.version not in (1, 2, 3):
             raise UnsupportedSchematicVersion(self.version)
-        self.data_version = _integer(self.root.get("DataVersion"), "Schematic DataVersion")
+        self.data_version = (None if self.version == 1 and "DataVersion" not in self.root else
+                             _integer(self.root.get("DataVersion"), "Schematic DataVersion"))
         sizes = [self.root.get(name) for name in ("Width", "Height", "Length")]
         if any(not isinstance(value, ShortTag) or int(value) == 0 for value in sizes):
             raise ValueError("Schematic dimensions must be nonzero unsigned shorts")
@@ -132,15 +137,24 @@ class Schematic:
     def save(self, path: PathInput) -> Path:
         """Save the native document atomically without cross-format data loss."""
         self._read_header()
-        write_root(self._document, path, name="Schematic" if self.version == 2 and self.root is self._document else "")
+        write_root(self._document, path, name="Schematic" if self.version < 3 and self.root is self._document else "")
         return Path(path)
 
-    def to_structure(self, *, max_blocks: int = DEFAULT_MAX_BLOCKS) -> Structure:
+    def to_structure(self, *, max_blocks: int = DEFAULT_MAX_BLOCKS,
+                     data_version: Optional[int] = None) -> Structure:
         """Normalize local cells/entities; offset and biomes remain on this document."""
         self._read_header()
+        if data_version is not None:
+            data_version = _integer(data_version, "source DataVersion")
+            if self.data_version is not None and data_version != self.data_version:
+                raise ValueError("source DataVersion disagrees with the document")
+        else:
+            data_version = self.data_version
+        if data_version is None:
+            raise MissingSchematicDataVersion("Sponge v1 has no DataVersion; supply the source data_version explicitly")
         volume = math.prod(self.size)
         check_volume(volume, max_blocks)
-        blocks = self.root if self.version == 2 else self.root.get("Blocks")
+        blocks = self.root if self.version < 3 else self.root.get("Blocks")
         if blocks is not None:
             _compound(blocks, "Blocks")
         palette = _palette(blocks.get("Palette"), "block Palette") if blocks is not None else {}
@@ -148,17 +162,18 @@ class Schematic:
         states = [parse_state(state if ":" in state.split("[", 1)[0] else f"minecraft:{state}")
                   for state in palette.values()]
         result = Structure.from_root(CompoundTag({
-            "DataVersion": IntTag(self.data_version), "size": _list(self.size),
+            "DataVersion": IntTag(data_version), "size": _list(self.size),
             "palette": ListTag(states), "blocks": ListTag(), "entities": ListTag(),
         }))
         sx, sy, sz = self.size
         if blocks is not None:
-            data = blocks.get("BlockData" if self.version == 2 else "Data")
+            data = blocks.get("BlockData" if self.version < 3 else "Data")
             for index, state in enumerate(_varints(data, volume, palette, "BlockData")):
                 y, remainder = divmod(index, sx * sz)
                 z, x = divmod(remainder, sx)
                 result.present[(x, y, z)] = remap[state]
-            for record in _records(blocks.get("BlockEntities", ListTag()), "BlockEntities"):
+            entity_key = "TileEntities" if self.version == 1 else "BlockEntities"
+            for record in _records(blocks.get(entity_key, ListTag()), entity_key):
                 if not isinstance(record.get("Pos"), IntArrayTag):
                     raise ValueError("block entity Pos must be an integer array")
                 pos = _vector(record["Pos"], "block entity Pos")
@@ -182,7 +197,7 @@ class Schematic:
         return result
 
     def _validate_biomes(self, volume):
-        if self.version == 2:
+        if self.version < 3:
             if "BiomeData" not in self.root:
                 return
             palette = _palette(self.root.get("BiomePalette"), "BiomePalette")

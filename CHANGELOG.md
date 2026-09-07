@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0
+
+- Add bounded SNBT I/O through the existing conversion API.
+- Read and copy Sponge v1 natively; normalization requires an explicit source DataVersion.
+- Preserve native Bedrock mcstructure documents and add optional, diagnosed Java/Bedrock block translation.
+
 ## 0.5.0
 
 - Add typed `convert_structure(source, output, ...)`, used by the native CLI.

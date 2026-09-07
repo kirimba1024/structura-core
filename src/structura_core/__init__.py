@@ -5,12 +5,14 @@ from .formats import load_structure
 from .litematic import Litematic, export_litematic
 from .nbt import AIR_NAMES, Structure, parse_state, save_structure, state_key
 from .schematic import Schematic
+from .bedrock import Mcstructure, export_mcstructure
 
 __all__ = [
     "AIR_NAMES", "Structure", "Litematic", "Schematic", "load_structure", "export_litematic",
     "parse_state", "save_structure", "state_key", "convert_structure", "ConversionWarning",
+    "Mcstructure", "export_mcstructure",
 ]
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 
 def __getattr__(name):

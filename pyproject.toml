@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "structura-core"
-version = "0.5.0"
-description = "Validated Minecraft Structure NBT, Litematic and Sponge I/O, conversion and voxel geometry"
+version = "0.6.0"
+description = "Validated Minecraft NBT/SNBT, Litematic, Sponge and optional Bedrock conversion, with voxel geometry"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 legacy = ["amulet-core>=1.9,<2"]
+bedrock = ["amulet-core>=1.9.35,<2"]
 
 [project.scripts]
 structura-convert = "structura_core.convert:main"
