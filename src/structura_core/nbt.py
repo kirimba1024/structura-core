@@ -17,6 +17,8 @@ from amulet_nbt import (
     ListTag,
     NamedTag,
     StringTag,
+)
+from amulet_nbt import (
     load as load_nbt,
 )
 
@@ -113,12 +115,43 @@ def parse_state(value: str) -> CompoundTag:
     return entry
 
 
+def _validate_palette(palette, label):
+    for entry in palette:
+        if not isinstance(entry, CompoundTag) or not isinstance(entry.get("Name"), StringTag):
+            raise ValueError(f"invalid palette entry in {label}")
+        properties = entry.get("Properties")
+        if properties is not None and (not isinstance(properties, CompoundTag)
+                or any(not isinstance(v, StringTag) for v in properties.values())):
+            raise ValueError(f"invalid palette properties in {label}")
+        parse_state(state_key(entry))
+
+
 class Structure:
     """In-memory Structure NBT with eagerly checked structural invariants."""
 
     def __init__(self, path, palette_index=0):
         self.path = Path(path)
-        root = load_root(self.path)
+        self._read(load_root(self.path), palette_index)
+
+    @classmethod
+    def from_root(cls, root, palette_index=0):
+        """Read an owned copy of a Structure NBT compound without a temporary file."""
+        result = cls.__new__(cls)
+        result.path = Path("<memory>")
+        result._read(deepcopy(root), palette_index)
+        return result
+
+    @classmethod
+    def from_bytes(cls, data, palette_index=0):
+        """Read raw or gzip-compressed NBT bytes."""
+        result = cls.__new__(cls)
+        result.path = Path("<memory>")
+        result._read(load_nbt(data, compressed=data.startswith(b"\x1f\x8b")).compound, palette_index)
+        return result
+
+    def _read(self, root, palette_index):
+        if not isinstance(root, CompoundTag):
+            raise ValueError("structure root must be an NBT compound")
         self._root = root
         palette_index = _integer(palette_index, "palette index")
         try:
@@ -185,14 +218,7 @@ class Structure:
         for palette in self.palettes_raw:
             if len(palette) != len(self.palette_raw):
                 raise ValueError(f"palettes must have equal lengths in {self.path}")
-            for entry in palette:
-                if not isinstance(entry, CompoundTag) or not isinstance(entry.get("Name"), StringTag):
-                    raise ValueError(f"invalid palette entry in {self.path}")
-                properties = entry.get("Properties")
-                if properties is not None and (not isinstance(properties, CompoundTag)
-                        or any(not isinstance(v, StringTag) for v in properties.values())):
-                    raise ValueError(f"invalid palette properties in {self.path}")
-                parse_state(state_key(entry))
+            _validate_palette(palette, str(self.path))
         self.palette = [str(entry["Name"]) for entry in self.palette_raw]
         for pos, index in self.present.items():
             _vector(pos, "block position")

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0
+
+- Read Litematic v5–v7 natively, including signed region sizes, palettes crossing
+  packed-word boundaries, tile entities and fractional entity positions.
+- Add `Litematic`, `load_structure`, `export_litematic` and `structura-convert`.
+  Native Litematic copies retain metadata/ticks; cross-format conversion has
+  explicit documented limits. Overlaps require a named region choice.
+- Add `Structure.from_root` and `Structure.from_bytes` using existing validation.
+  Caller-owned compounds are copied. Existing Structure APIs remain available.
+- Keep the Minecraft data version unchanged; validate sizes, palette indices,
+  entity IDs and configurable allocation limits before export.
+- Use reproducible, atomic Litematic writes and include an independently
+  generated Litemapy interoperability fixture in the source distribution.
+
 ## 0.2.3
 
 - Preserve alternative palettes, unknown root/block fields and entity payloads

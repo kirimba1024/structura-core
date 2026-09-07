@@ -2,6 +2,7 @@ import pytest
 from amulet_nbt import CompoundTag, DoubleTag, IntTag, ListTag, LongArrayTag, StringTag
 
 from structura_core.nbt import Structure, load_root, save_structure, write_root
+from amulet_nbt import NamedTag
 
 
 def structure_root(*, palettes=False):
@@ -29,6 +30,22 @@ def structure_root(*, palettes=False):
     else:
         root["palette"] = ListTag([stone])
     return root
+
+
+def test_memory_root_is_owned_and_uses_the_same_validation():
+    root = structure_root(palettes=True)
+    src = Structure.from_root(root, palette_index=1)
+    assert src.name_at((0, 0, 0)) == "minecraft:dirt"
+    root["palettes"][1][0]["Name"] = StringTag("minecraft:air")
+    assert str(src.palette_raw[0]["Name"]) == "minecraft:dirt"
+    with pytest.raises(ValueError, match="root must be"):
+        Structure.from_root(ListTag())
+
+
+@pytest.mark.parametrize("compressed", [False, True])
+def test_memory_bytes_read_raw_and_gzip(compressed):
+    data = NamedTag(structure_root()).save_to(compressed=compressed)
+    assert Structure.from_bytes(data).name_at((0, 0, 0)) == "minecraft:stone"
 
 
 @pytest.mark.parametrize("compressed", [False, True])

@@ -3,6 +3,7 @@
 Reusable Minecraft Java 1.21.1 structure-processing core. It owns:
 
 - validated Java Structure NBT I/O;
+- native Litematic v5, v6 and v7 reading and writing;
 - legacy schematic conversion and numeric analysis;
 - NumPy/SciPy voxel geometry primitives (connected components, closing).
 
@@ -14,11 +15,78 @@ produce reproducible gzip bytes; they need not match the original file bytes.
 The library targets Minecraft Java 1.21.1 by default. Version constants live
 in `structura_core.version`; callers can still pass an explicit Amulet
 translation target to the legacy converter.
+Native I/O retains the source Minecraft `DataVersion` and does not upgrade
+block states or entity payloads between game versions.
 
 ```bash
 pip install structura-core
 structura-analyze path/to/structure.nbt --json
 ```
+
+## Native conversion
+
+```bash
+structura-convert house.litematic house.nbt
+structura-convert house.nbt house.litematic
+structura-convert house.litematic house.schem --region Main
+```
+
+These commands need only the base package. Litematic is parsed directly with
+the existing NBT dependency. Litemapy is used to produce an interoperability
+test fixture, and is not an installation dependency.
+
+```python
+from structura_core import Litematic, Structure, export_litematic, load_structure
+
+document = Litematic("house.litematic")
+print(document.region_names)
+structure = load_structure("house.litematic", region="Main")
+export_litematic(structure, "house-copy.litematic")
+
+structure = Structure.from_bytes(nbt_bytes)
+structure = Structure.from_root(nbt_compound)
+```
+
+`from_root` owns a copy; caller-owned NBT is not modified. Both in-memory
+constructors use the same validation as `Structure(path)`.
+
+| Operation | Preserved / conversion rules |
+|---|---|
+| `Litematic(path).save(output)` | All native regions, metadata, pending ticks and unknown NBT fields; gzip bytes are reproducible. |
+| `Litematic.to_structure()` | Block states, block entities, entity payloads and positions; all disjoint regions share one bounding box. |
+| `load_structure(path, region="Main")` | One named Litematic region; blocks are normalized to nonnegative local coordinates. `source_origin` maps them back to schematic coordinates. |
+| `export_litematic(structure, output)` | One region at `(0,0,0)`, using the selected palette. Missing cells become `minecraft:structure_void`, the no-placement marker; explicit air remains air. |
+
+Negative region sizes do not mirror the blocks. Entity positions and block
+positions use different Litematic coordinate conventions, both handled by the
+reader. Overlapping regions are rejected instead of depending on file order;
+choose a region explicitly. Unsupported versions and malformed arrays fail
+with a `ValueError`.
+
+Cross-format conversion does not preserve Litematic region names/layout,
+placement origin, preview, scheduling ticks or arbitrary document metadata in
+Structure NBT. Keep the native `Litematic` document when these matter.
+Litematic export uses the active Structure palette; other palette variants and
+additional Structure block-record fields are not representable there.
+Minecraft entity `id` values are required for export. No IDs are guessed.
+
+Native Litematic decoding and encoding default to at most 2,000,000 cells,
+checked before unpacking or allocating block arrays. Raise `max_blocks` in
+Python or `--max-blocks` in the converter for trusted larger files. This is an
+allocation guard, not a sandbox for arbitrary untrusted compressed files.
+
+## Stable responsibilities
+
+`nbt.py` owns Structure validation and serialization; `litematic.py` adapts the
+native format; `formats.py` selects the reader; `convert.py` supplies the CLI.
+Readers retain block state IDs and properties rather than maintaining another
+Minecraft registry. A game upgrade does not silently rewrite source data.
+
+New editing tools and interactive navigation belong to a separate future
+`structura-edit` package. Existing generation helpers remain available for
+compatibility.
+
+## Legacy input and existing helpers
 
 The `legacy` extra is needed for legacy input conversion. Structure NBT
 processing and Sponge v2 `.schem` export do not require `amulet-core`.

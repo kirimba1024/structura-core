@@ -89,4 +89,4 @@ jobs:
       - run: python -m pip install dist/*.whl pytest
       - run: python -m pip check
       - run: python -c "import importlib.util; assert importlib.util.find_spec('amulet') is None"
-      - run: python -m pytest -q tests/test_nbt.py tests/test_export_schematic.py tests/test_voxel.py
+      - run: python -m pytest -q tests/test_nbt.py tests/test_litematic.py tests/test_convert.py tests/test_export_schematic.py tests/test_voxel.py

@@ -1,6 +1,11 @@
 """Reusable Minecraft structure processing primitives."""
 
+from .formats import load_structure
+from .litematic import Litematic, export_litematic
 from .nbt import AIR_NAMES, Structure, parse_state, save_structure, state_key
 
-__all__ = ["AIR_NAMES", "Structure", "parse_state", "save_structure", "state_key"]
-__version__ = "0.2.3"
+__all__ = [
+    "AIR_NAMES", "Structure", "Litematic", "load_structure", "export_litematic",
+    "parse_state", "save_structure", "state_key",
+]
+__version__ = "0.3.0"
