@@ -5,8 +5,6 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Optional, Tuple
 
-from .nbt import PathInput
-
 from amulet_nbt import (
     ByteArrayTag,
     CompoundTag,
@@ -18,8 +16,11 @@ from amulet_nbt import (
     StringTag,
 )
 
+from .blockstates import parse_state
 from .limits import DEFAULT_MAX_BLOCKS, DEFAULT_MAX_NBT_BYTES, check_volume
-from .nbt import Structure, _integer, _vector, load_root, parse_state, write_root
+from .nbt_io import PathInput, load_root, write_root
+from .structure import Structure
+from .validation import compound, compound_list, int32, vector
 
 
 class UnsupportedSchematicVersion(ValueError):
@@ -32,20 +33,8 @@ class MissingSchematicDataVersion(ValueError):
     pass
 
 
-def _compound(value, label):
-    if not isinstance(value, CompoundTag):
-        raise ValueError(f"{label} must be a compound")
-    return value
-
-
-def _records(value, label):
-    if not isinstance(value, ListTag) or any(not isinstance(entry, CompoundTag) for entry in value):
-        raise ValueError(f"{label} must be a list of compounds")
-    return value
-
-
 def _palette(value, label):
-    entries = _compound(value, label)
+    entries = compound(value, label)
     result = {}
     for state, tag in entries.items():
         if not isinstance(tag, IntTag) or int(tag) < 0 or int(tag) in result:
@@ -84,7 +73,7 @@ def _payload(record, version, label):
     if not isinstance(identifier, StringTag) or not str(identifier):
         raise ValueError(f"{label} requires a nonempty string Id")
     if version == 3:
-        result = deepcopy(_compound(record.get("Data", CompoundTag()), f"{label}.Data"))
+        result = deepcopy(compound(record.get("Data", CompoundTag()), f"{label}.Data"))
     else:
         result = deepcopy(record)
         result.pop("Id", None)
@@ -117,13 +106,13 @@ class Schematic:
         return result
 
     def _read_header(self):
-        document = _compound(self._document, "Schematic document")
-        self.root = _compound(document.get("Schematic", document), "Schematic")
-        self.version = _integer(self.root.get("Version"), "Schematic Version")
+        document = compound(self._document, "Schematic document")
+        self.root = compound(document.get("Schematic", document), "Schematic")
+        self.version = int32(self.root.get("Version"), "Schematic Version")
         if self.version not in (1, 2, 3):
             raise UnsupportedSchematicVersion(self.version)
         self.data_version = (None if self.version == 1 and "DataVersion" not in self.root else
-                             _integer(self.root.get("DataVersion"), "Schematic DataVersion"))
+                             int32(self.root.get("DataVersion"), "Schematic DataVersion"))
         sizes = [self.root.get(name) for name in ("Width", "Height", "Length")]
         if any(not isinstance(value, ShortTag) or int(value) == 0 for value in sizes):
             raise ValueError("Schematic dimensions must be nonzero unsigned shorts")
@@ -131,8 +120,8 @@ class Schematic:
         offset = self.root.get("Offset", IntArrayTag([0, 0, 0]))
         if not isinstance(offset, IntArrayTag):
             raise ValueError("Schematic Offset must be an integer array")
-        self.offset = _vector(offset, "Schematic Offset")
-        _compound(self.root.get("Metadata", CompoundTag()), "Schematic Metadata")
+        self.offset = vector(offset, "Schematic Offset")
+        compound(self.root.get("Metadata", CompoundTag()), "Schematic Metadata")
 
     def save(self, path: PathInput) -> Path:
         """Save the native document atomically without cross-format data loss."""
@@ -145,7 +134,7 @@ class Schematic:
         """Normalize local cells/entities; offset and biomes remain on this document."""
         self._read_header()
         if data_version is not None:
-            data_version = _integer(data_version, "source DataVersion")
+            data_version = int32(data_version, "source DataVersion")
             if self.data_version is not None and data_version != self.data_version:
                 raise ValueError("source DataVersion disagrees with the document")
         else:
@@ -156,7 +145,7 @@ class Schematic:
         check_volume(volume, max_blocks)
         blocks = self.root if self.version < 3 else self.root.get("Blocks")
         if blocks is not None:
-            _compound(blocks, "Blocks")
+            compound(blocks, "Blocks")
         palette = _palette(blocks.get("Palette"), "block Palette") if blocks is not None else {}
         remap = {index: i for i, index in enumerate(palette)}
         states = [parse_state(state if ":" in state.split("[", 1)[0] else f"minecraft:{state}")
@@ -173,25 +162,26 @@ class Schematic:
                 z, x = divmod(remainder, sx)
                 result.present[(x, y, z)] = remap[state]
             entity_key = "TileEntities" if self.version == 1 else "BlockEntities"
-            for record in _records(blocks.get(entity_key, ListTag()), entity_key):
+            for record in compound_list(blocks.get(entity_key, ListTag()), entity_key):
                 if not isinstance(record.get("Pos"), IntArrayTag):
                     raise ValueError("block entity Pos must be an integer array")
-                pos = _vector(record["Pos"], "block entity Pos")
+                pos = vector(record["Pos"], "block entity Pos")
                 if pos not in result.present or pos in result.block_nbt:
                     raise ValueError(f"duplicate or out-of-bounds block entity at {pos}")
                 nbt = _payload(record, self.version, "block entity")
                 nbt.update({axis: IntTag(value) for axis, value in zip("xyz", pos)})
                 result.block_nbt[pos] = nbt
-        for record in _records(self.root.get("Entities", ListTag()), "Entities"):
-            pos = _vector(record.get("Pos"), "entity Pos", integer=False)
+        for record in compound_list(self.root.get("Entities", ListTag()), "Entities"):
+            pos = vector(record.get("Pos"), "entity Pos", integer=False)
             nbt = _payload(record, self.version, "entity")
             nbt["Pos"] = _list(pos, DoubleTag)
             result.entities.append(CompoundTag({
                 "pos": _list(pos, DoubleTag),
-                "blockPos": _list(_vector(tuple(math.floor(v) for v in pos), "entity block position")),
+                "blockPos": _list(vector(tuple(math.floor(v) for v in pos), "entity block position")),
                 "nbt": nbt,
             }))
         self._validate_biomes(volume)
+        result.path = self.path
         result.source_origin = self.offset
         result.validate()
         return result
@@ -205,7 +195,7 @@ class Schematic:
         else:
             if "Biomes" not in self.root:
                 return
-            biomes = _compound(self.root["Biomes"], "Biomes")
+            biomes = compound(self.root["Biomes"], "Biomes")
             palette = _palette(biomes.get("Palette"), "Biome Palette")
             data, count = biomes.get("Data"), volume
         for value in palette.values():

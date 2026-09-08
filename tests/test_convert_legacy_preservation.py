@@ -1,3 +1,4 @@
+import json
 import logging
 
 import numpy as np
@@ -5,6 +6,8 @@ import pytest
 from amulet_nbt import (
     ByteArrayTag, ByteTag, CompoundTag, DoubleTag, IntTag, ListTag, ShortTag, StringTag,
 )
+
+pytest.importorskip("amulet")
 
 from structura_core import Structure
 from structura_core.convert_legacy import convert
@@ -41,7 +44,7 @@ def test_preserving_conversion_keeps_layout_materials_and_exportable_block_nbt(t
     monkeypatch.setenv("AMULET_LEVEL_CACHE_DIR", str(tmp_path / "cache"))
     source = legacy_file(tmp_path)
     output = tmp_path / "preserved.nbt"
-    convert(str(source), str(output), 3955, preserve_all_entities=True, prepare_for_placement=False)
+    convert(str(source), str(output), 3955, preserve_all_entities=True)
     structure = Structure(output)
 
     assert structure.size == (3, 3, 3)
@@ -59,15 +62,35 @@ def test_preserving_conversion_keeps_layout_materials_and_exportable_block_nbt(t
     assert schematic["Entities"][0]["Id"] == StringTag("example:item_frame")
 
 
-def test_historical_placement_cleanup_remains_available(tmp_path, monkeypatch):
-    monkeypatch.setenv("AMULET_LEVEL_CACHE_DIR", str(tmp_path / "cache"))
-    output = tmp_path / "prepared.nbt"
-    convert(str(legacy_file(tmp_path)), str(output), 3955)
-    structure = Structure(output)
+def test_placement_preparation_points_to_geo_without_writing(tmp_path):
+    output = tmp_path / "unchanged.nbt"
+    output.write_bytes(b"keep")
+    with pytest.raises(ValueError, match="structura_geo"):
+        convert("missing", str(output), 3955, prepare_for_placement=True)
+    assert output.read_bytes() == b"keep"
 
-    assert structure.size == (3, 1, 1)
-    assert structure.name_at((2, 0, 0)) == "minecraft:cobblestone"
-    assert structure.entities == []
+
+def test_conversion_preserves_formatted_legacy_sign_text(tmp_path, monkeypatch):
+    monkeypatch.setenv("AMULET_LEVEL_CACHE_DIR", str(tmp_path / "cache"))
+    source = legacy_file(tmp_path)
+    root = load_root(source)
+    blocks = root["Blocks"].np_array.copy()
+    blocks[12] = 63
+    root["Blocks"] = ByteArrayTag(blocks)
+    root["TileEntities"] = ListTag([CompoundTag({
+        "id": StringTag("Sign"), "x": IntTag(0), "y": IntTag(1), "z": IntTag(1),
+        "Text1": StringTag('{"text":"Welcome","color":"red"}'),
+        "Text2": StringTag("Plain text"), "Text3": StringTag(""), "Text4": StringTag(""),
+    })])
+    write_root(root, source, name="Schematic")
+    output = tmp_path / "sign.nbt"
+
+    convert(str(source), str(output), 3955)
+
+    messages = Structure(output).block_nbt[(0, 1, 1)]["front_text"]["messages"]
+    assert [json.loads(str(message)) for message in messages] == [
+        {"text": "Welcome", "color": "red"}, {"text": "Plain text"}, {"text": ""}, {"text": ""},
+    ]
 
 
 def test_failed_conversion_restores_amulet_logger(tmp_path, monkeypatch):

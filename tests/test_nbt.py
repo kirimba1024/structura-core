@@ -234,7 +234,7 @@ def test_shift_updates_known_entity_coordinates_without_mutating_source(tmp_path
 
 
 def test_write_root_failure_preserves_previous_file_and_removes_temporary(tmp_path, monkeypatch):
-    from structura_core import nbt
+    from structura_core import nbt_io
 
     path = tmp_path / "saved.nbt"
     path.write_bytes(b"original")
@@ -242,7 +242,7 @@ def test_write_root_failure_preserves_previous_file_and_removes_temporary(tmp_pa
     def fail_replace(*args):
         raise OSError("simulated interrupted write")
 
-    monkeypatch.setattr(nbt.os, "replace", fail_replace)
+    monkeypatch.setattr(nbt_io.os, "replace", fail_replace)
     with pytest.raises(OSError, match="interrupted"):
         write_root(structure_root(), path)
 
@@ -289,3 +289,48 @@ def test_malformed_record_containers_raise_value_error(tmp_path, field):
 
     with pytest.raises(ValueError, match=field):
         Structure(path)
+
+
+def test_shift_moves_block_entity_coordinates_and_preserves_payload(tmp_path, make_structure, nbt_snapshot):
+    source = make_structure([((1, 1, 1), 0)], size=(3, 3, 3), palette=("minecraft:chest",))
+    source.block_nbt[1, 1, 1] = CompoundTag({
+        "id": StringTag("minecraft:chest"), "x": IntTag(1), "y": IntTag(1), "z": IntTag(1),
+        "custom": CompoundTag({"x": IntTag(123)}),
+    })
+    before = nbt_snapshot(source.block_nbt[1, 1, 1])
+    output = tmp_path / "shifted.nbt"
+
+    save_structure(source, output, (3, 3, 3), shift=(-1, 1, 0))
+    restored = Structure(output)
+
+    assert set(restored.block_nbt) == {(0, 2, 1)}
+    assert tuple(int(restored.block_nbt[0, 2, 1][axis]) for axis in "xyz") == (0, 2, 1)
+    assert restored.block_nbt[0, 2, 1]["custom"]["x"] == IntTag(123)
+    assert nbt_snapshot(source.block_nbt[1, 1, 1]) == before
+
+
+def test_shift_preserves_entity_anchor_offset_from_block_position(tmp_path, make_structure):
+    from amulet_nbt import from_snbt
+
+    source = make_structure()
+    source.entities = [from_snbt('''{pos:[0.5d,1d,0.5d],blockPos:[0,1,0],nbt:{
+        id:"minecraft:painting",Pos:[0.5d,1d,0.5d],TileX:0,TileY:0,TileZ:0}}''')]
+    output = tmp_path / "painting.nbt"
+    save_structure(source, output, (5, 4, 3), shift=(0, 1, 0))
+    entity = Structure(output).entities[0]
+
+    assert tuple(int(value) for value in entity["blockPos"]) == (0, 2, 0)
+    assert int(entity["nbt"]["TileY"]) == 1
+    assert entity["pos"] == entity["nbt"]["Pos"]
+
+
+@pytest.mark.parametrize("previous_x", [0, 1, 2 ** 31 - 1])
+def test_shift_uses_block_position_even_for_previously_rebased_payloads(tmp_path, make_structure, previous_x):
+    source = make_structure([((0, 0, 0), 0)])
+    source.block_nbt[0, 0, 0] = CompoundTag({"x": IntTag(previous_x)})
+    output = tmp_path / "shifted.nbt"
+
+    save_structure(source, output, source.size, shift=(1, 0, 0))
+
+    assert Structure(output).block_nbt[1, 0, 0] == CompoundTag({"x": IntTag(1)})
+    assert source.block_nbt[0, 0, 0] == CompoundTag({"x": IntTag(previous_x)})

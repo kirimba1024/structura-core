@@ -16,7 +16,8 @@ def use_api(source: Path, data: bytes) -> tuple[Path, Structure]:
     width: int = schematic.size[0]
     block: str | None = structure.name_at((0, 0, 0))
     if block and width > 0:
-        save_structure(structure, "copy.nbt", structure.size)
+        written: int = save_structure(structure, "copy.nbt", structure.size)
+        assert written >= 0
     result = convert_structure(structure, "copy.schem", strict=True)
     export_litematic(structure, "copy.litematic")
     result = convert_structure(structure, "copy.snbt", strict=True)

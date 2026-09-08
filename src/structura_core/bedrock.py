@@ -7,9 +7,11 @@ from typing import Tuple
 
 from amulet_nbt import ByteTag, CompoundTag, IntTag, ListTag, StringTag
 
+from .blockstates import parse_state
 from .limits import DEFAULT_MAX_BLOCKS, DEFAULT_MAX_NBT_BYTES, check_volume
-from .nbt import PathInput, Structure, _integer, _vector, load_root, parse_state, write_root
-from .schematic import _compound, _records
+from .nbt_io import PathInput, load_root, write_root
+from .structure import Structure
+from .validation import compound, compound_list, int32, vector
 
 
 class Mcstructure:
@@ -33,20 +35,20 @@ class Mcstructure:
         return result
 
     def validate(self, *, max_blocks: int = DEFAULT_MAX_BLOCKS) -> None:
-        root = _compound(self.root, "mcstructure")
-        if _integer(root.get("format_version"), "format_version") != 1:
+        root = compound(self.root, "mcstructure")
+        if int32(root.get("format_version"), "format_version") != 1:
             raise ValueError("unsupported mcstructure format_version; expected 1")
-        self.size = _vector(root.get("size"), "mcstructure size")
+        self.size = vector(root.get("size"), "mcstructure size")
         if any(value < 1 for value in self.size):
             raise ValueError("mcstructure dimensions must be positive")
         volume = math.prod(self.size)
         check_volume(volume, max_blocks)
-        self.origin = _vector(root.get("structure_world_origin"), "structure_world_origin")
-        self.structure = _compound(root.get("structure"), "structure")
-        self.entities = _records(self.structure.get("entities"), "entities")
-        palettes = _compound(self.structure.get("palette"), "palette")
-        self.palette = _compound(palettes.get("default"), "default palette")
-        self.states = _records(self.palette.get("block_palette"), "block_palette")
+        self.origin = vector(root.get("structure_world_origin"), "structure_world_origin")
+        self.structure = compound(root.get("structure"), "structure")
+        self.entities = compound_list(self.structure.get("entities"), "entities")
+        palettes = compound(self.structure.get("palette"), "palette")
+        self.palette = compound(palettes.get("default"), "default palette")
+        self.states = compound_list(self.palette.get("block_palette"), "block_palette")
         for entry in self.states:
             name = entry.get("name")
             if not isinstance(name, StringTag):
@@ -54,11 +56,11 @@ class Mcstructure:
             if str(parse_state(str(name))["Name"]) != str(name):
                 raise ValueError("Bedrock block names cannot include state properties")
             if "states" in entry:
-                states = _compound(entry["states"], "block states")
+                states = compound(entry["states"], "block states")
                 if any(not isinstance(value, (ByteTag, IntTag, StringTag)) for value in states.values()):
                     raise ValueError("Bedrock block states must be byte, integer or string tags")
             if "version" in entry:
-                _integer(entry["version"], "Bedrock block version")
+                int32(entry["version"], "Bedrock block version")
         self.layers = self.structure.get("block_indices")
         if not isinstance(self.layers, ListTag) or len(self.layers) != 2:
             raise ValueError("mcstructure requires two block-index layers")
@@ -67,7 +69,7 @@ class Mcstructure:
                 raise ValueError(f"each block-index layer must contain {volume} cells")
             if any(not isinstance(value, IntTag) or not -1 <= int(value) < len(self.states) for value in layer):
                 raise ValueError("invalid Bedrock palette index")
-        self.position_data = _compound(self.palette.get("block_position_data", CompoundTag()), "block_position_data")
+        self.position_data = compound(self.palette.get("block_position_data", CompoundTag()), "block_position_data")
         for key, value in self.position_data.items():
             try:
                 index = int(key)
@@ -75,9 +77,9 @@ class Mcstructure:
                 raise ValueError("invalid block_position_data index") from error
             if str(index) != key or not 0 <= index < volume:
                 raise ValueError("out-of-bounds or noncanonical block_position_data index")
-            value = _compound(value, "block_position_data record")
+            value = compound(value, "block_position_data record")
             if "block_entity_data" in value:
-                _compound(value["block_entity_data"], "block_entity_data")
+                compound(value["block_entity_data"], "block_entity_data")
                 if int(self.layers[0][index]) == -1:
                     raise ValueError("block entity without a primary block")
 
@@ -99,9 +101,10 @@ class Mcstructure:
 
 def export_mcstructure(src: Structure, output: PathInput, *, target_version: Tuple[int, int, int] = (1, 21, 0),
                        strict: bool = False, max_blocks: int = DEFAULT_MAX_BLOCKS) -> Path:
-    from .bedrock_translation import export_bedrock
-    from .conversion_losses import conversion_losses, ConversionWarning
     import warnings
+
+    from .bedrock_translation import export_bedrock
+    from .conversion_losses import ConversionWarning, conversion_losses
 
     src.validate()
     check_volume(math.prod(src.size), max_blocks)

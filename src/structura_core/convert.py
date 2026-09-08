@@ -7,14 +7,15 @@ from os import PathLike
 from pathlib import Path
 from typing import Optional, Tuple, Union
 
+from .bedrock import Mcstructure, export_mcstructure
 from .conversion_losses import ConversionWarning, conversion_losses, document_losses
 from .export_schematic import export_schematic
 from .formats import load_structure
 from .limits import DEFAULT_MAX_BLOCKS, DEFAULT_MAX_NBT_BYTES, check_volume
 from .litematic import Litematic, export_litematic
-from .nbt import Structure, save_structure
 from .schematic import Schematic
-from .bedrock import Mcstructure, export_mcstructure
+from .structure import Structure
+from .structure_writer import save_structure
 
 
 def convert_structure(source: Union[str, PathLike[str], Structure], output: Union[str, PathLike[str]], *,

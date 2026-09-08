@@ -11,8 +11,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 
-from .nbt import PathInput
-
 from amulet_nbt import (
     CompoundTag,
     DoubleTag,
@@ -23,18 +21,12 @@ from amulet_nbt import (
     StringTag,
 )
 
+from .blockstates import AIR_NAMES, parse_state, validate_palette
 from .limits import DEFAULT_MAX_BLOCKS, DEFAULT_MAX_NBT_BYTES
 from .limits import check_volume as _check_volume
-from .nbt import (
-    AIR_NAMES,
-    Structure,
-    _integer,
-    _validate_palette,
-    _vector,
-    load_root,
-    parse_state,
-    write_root,
-)
+from .nbt_io import PathInput, load_root, write_root
+from .structure import Structure
+from .validation import compound_list, int32, vector
 
 _WORD_MASK = (1 << 64) - 1
 
@@ -42,7 +34,7 @@ _WORD_MASK = (1 << 64) - 1
 def _xyz(tag, label):
     if not isinstance(tag, CompoundTag) or not {"x", "y", "z"} <= tag.keys():
         raise ValueError(f"{label} must be an x/y/z compound")
-    return _vector((tag[axis] for axis in "xyz"), label)
+    return vector((tag[axis] for axis in "xyz"), label)
 
 
 def _position(values):
@@ -51,12 +43,6 @@ def _position(values):
 
 def _list(values, tag=IntTag):
     return ListTag([tag(value) for value in values])
-
-
-def _compounds(tag, label):
-    if not isinstance(tag, ListTag) or any(not isinstance(v, CompoundTag) for v in tag):
-        raise ValueError(f"{label} must be a list of compounds")
-    return tag
 
 
 def _require_id(nbt, label):
@@ -113,10 +99,10 @@ class _Region:
 
 
 def _merge_region(result, region, origin, palette_lookup):
-    palette = _compounds(region.nbt.get("BlockStatePalette"), "BlockStatePalette")
+    palette = compound_list(region.nbt.get("BlockStatePalette"), "BlockStatePalette")
     if not palette:
         raise ValueError(f"empty Litematic palette in region {region.name!r}")
-    _validate_palette(palette, region.name)
+    validate_palette(palette, region.name)
     remap = []
     for block in palette:
         key = block.to_snbt()
@@ -133,7 +119,7 @@ def _merge_region(result, region, origin, palette_lookup):
         if pos in result.present:
             raise ValueError(f"overlapping Litematic regions at {pos}; choose a named region")
         result.present[pos] = remap[state]
-    for raw in _compounds(region.nbt.get("TileEntities", ListTag()), "TileEntities"):
+    for raw in compound_list(region.nbt.get("TileEntities", ListTag()), "TileEntities"):
         local = _xyz(raw, "tile entity position")
         if any(not 0 <= v < s for v, s in zip(local, region.size)):
             raise ValueError(f"tile entity outside Litematic region {region.name!r}")
@@ -143,14 +129,14 @@ def _merge_region(result, region, origin, palette_lookup):
         nbt = deepcopy(raw)
         nbt.update(_position(pos))
         result.block_nbt[pos] = nbt
-    for raw in _compounds(region.nbt.get("Entities", ListTag()), "Entities"):
-        local = _vector(raw.get("Pos"), "Litematic entity Pos", integer=False)
+    for raw in compound_list(region.nbt.get("Entities", ListTag()), "Entities"):
+        local = vector(raw.get("Pos"), "Litematic entity Pos", integer=False)
         pos = tuple(v + p - o for v, p, o in zip(local, region.position, origin))
         nbt = deepcopy(raw)
         nbt["Pos"] = _list(pos, DoubleTag)
         result.entities.append(CompoundTag({
             "pos": _list(pos, DoubleTag),
-            "blockPos": _list(_vector(tuple(math.floor(v) for v in pos), "entity block position")),
+            "blockPos": _list(vector(tuple(math.floor(v) for v in pos), "entity block position")),
             "nbt": nbt,
         }))
 
@@ -178,10 +164,10 @@ class Litematic:
     def _validate_header(self):
         if not isinstance(self.root, CompoundTag):
             raise ValueError("Litematic root must be a compound")
-        version = _integer(self.root.get("Version"), "Litematic Version")
+        version = int32(self.root.get("Version"), "Litematic Version")
         if version not in (5, 6, 7):
             raise ValueError(f"unsupported Litematic version {version}; expected 5, 6 or 7")
-        self.data_version = _integer(self.root.get("MinecraftDataVersion"), "MinecraftDataVersion")
+        self.data_version = int32(self.root.get("MinecraftDataVersion"), "MinecraftDataVersion")
         regions = self.root.get("Regions")
         if not isinstance(regions, CompoundTag) or not regions:
             raise ValueError("Litematic must contain named Regions")
@@ -222,7 +208,7 @@ class Litematic:
             for axis in range(3)
         )
         root = CompoundTag({
-            "DataVersion": IntTag(self.data_version), "size": _list(_vector(size, "combined size")),
+            "DataVersion": IntTag(self.data_version), "size": _list(vector(size, "combined size")),
             "palette": ListTag(), "blocks": ListTag(), "entities": ListTag(),
         })
         result = Structure.from_root(root)
@@ -246,7 +232,7 @@ def export_litematic(src: Structure, destination: PathInput, *, name: Optional[s
     src.validate()
     count = math.prod(src.size)
     _check_volume(count, max_blocks)
-    _integer(count, "Litematic TotalVolume")
+    int32(count, "Litematic TotalVolume")
     palette = [parse_state("minecraft:air")]
     lookup = {palette[0].to_snbt(): 0}
     remap = []
@@ -279,7 +265,7 @@ def export_litematic(src: Structure, destination: PathInput, *, name: Optional[s
     for record in src.entities:
         _require_id(record["nbt"], "entity")
         nbt = deepcopy(record["nbt"])
-        nbt["Pos"] = _list(_vector(record["pos"], "entity position", integer=False), DoubleTag)
+        nbt["Pos"] = _list(vector(record["pos"], "entity position", integer=False), DoubleTag)
         entities.append(nbt)
     region_name = name if name is not None else Path(destination).stem
     if not isinstance(region_name, str) or not region_name or not isinstance(author, str):

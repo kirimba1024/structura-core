@@ -6,9 +6,11 @@ from copy import deepcopy
 
 from amulet_nbt import CompoundTag, IntTag, ListTag, NamedTag, StringTag
 
+from .blockstates import parse_state
 from .conversion_losses import ConversionWarning, _fields
-from .nbt import Structure, _integer, _vector, parse_state
 from .schematic import _list
+from .structure import Structure
+from .validation import int32, vector
 
 
 class _Bridge:
@@ -21,7 +23,7 @@ class _Bridge:
             raise ModuleNotFoundError("Bedrock translation needs: pip install 'structura-core[bedrock]'", name="amulet") from error
         self.Block, self.BlockEntity = Block, BlockEntity
         self.manager = PyMCTranslate.new_translation_manager()
-        version = _vector(target_version, "target_version")
+        version = vector(target_version, "target_version")
         if version not in self.manager.version_numbers(platform):
             raise ValueError(f"translator has no exact {platform} schema {version}; choose a supported target_version")
         self.target = self.manager.get_version(platform, version)
@@ -34,7 +36,7 @@ class _Bridge:
     def version(self, platform, data_version):
         key = platform, data_version
         if key not in self.versions:
-            data_version = _integer(data_version, f"{platform} block version")
+            data_version = int32(data_version, f"{platform} block version")
             versions = [self.manager.get_version(platform, value) for value in self.manager.version_numbers(platform)]
             candidates = [value for value in versions if value.data_version <= data_version]
             if not candidates or data_version > max(value.data_version for value in versions):
@@ -226,6 +228,7 @@ def import_bedrock(document, target_version, strict):
         bridge.losses["additional native Bedrock fields omitted"] = 1
     bridge.report(strict)
     result = Structure.from_root(root)
+    result.path = document.path
     result.source_origin = document.origin
     return result
 

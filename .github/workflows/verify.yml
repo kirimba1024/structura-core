@@ -70,7 +70,14 @@ jobs:
           subprocess.check_call([sys.executable, "-m", "pip", "install", f"{wheel}[legacy]"])
           PYTHON
       - name: Check installed package location
-        run: python -c "import structura_core; assert 'site-packages' in structura_core.__file__, structura_core.__file__"
+        shell: bash
+        run: |
+          python - <<'PYTHON'
+          import importlib.metadata
+          import structura_core
+          assert structura_core.__version__ == importlib.metadata.version("structura-core")
+          assert "site-packages" in structura_core.__file__, structura_core.__file__
+          PYTHON
       - run: python -m ruff check src tests
       - run: python -m pytest -q tests
 
@@ -88,8 +95,8 @@ jobs:
           path: dist/
       - run: python -m pip install dist/*.whl pytest
       - run: python -m pip check
-      - run: python -c "import importlib.util; assert importlib.util.find_spec('amulet') is None"
-      - run: python -m pytest -q tests/test_nbt.py tests/test_litematic.py tests/test_schematic.py tests/test_convert.py tests/test_conversion_api.py tests/test_export_schematic.py tests/test_voxel.py tests/test_additional_formats.py tests/test_conversion_invariants.py
+      - run: python -c "import importlib.util; assert all(importlib.util.find_spec(name) is None for name in ('amulet', 'scipy', 'structura_geo'))"
+      - run: python -m pytest -q tests
 
   public-api:
     needs: build

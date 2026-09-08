@@ -5,8 +5,9 @@ from typing import Optional, Tuple
 
 from .limits import DEFAULT_MAX_BLOCKS, DEFAULT_MAX_NBT_BYTES
 from .litematic import Litematic
-from .nbt import PathInput, Structure
+from .nbt_io import PathInput
 from .schematic import Schematic
+from .structure import Structure
 
 
 def load_structure(path: PathInput, *, region: Optional[str] = None, palette_index: int = 0,

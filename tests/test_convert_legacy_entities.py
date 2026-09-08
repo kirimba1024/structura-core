@@ -1,4 +1,7 @@
+import pytest
 from amulet_nbt import CompoundTag, DoubleTag, ListTag, StringTag
+
+pytest.importorskip("amulet")
 
 from structura_core.convert_legacy import (
     _entity_data,

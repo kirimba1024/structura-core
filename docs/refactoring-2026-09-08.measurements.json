@@ -1,0 +1,40 @@
+{
+  "python": "3.9.6",
+  "numpy": "1.26.4",
+  "scipy": "1.13.1",
+  "benchmarks": {
+    "dense": {
+      "after": {
+        "blocks": 24000,
+        "seconds_min": 0.1561910419999999,
+        "peak_bytes": 5309861
+      },
+      "before": {
+        "blocks": 24000,
+        "seconds_min": 0.15662729200000003,
+        "peak_bytes": 5597505
+      },
+      "report_unchanged": true
+    },
+    "sparse": {
+      "after": {
+        "blocks": 8000,
+        "seconds_min": 0.055150083999999655,
+        "peak_bytes": 3248360
+      },
+      "before": {
+        "blocks": 8000,
+        "seconds_min": 0.056454334000000106,
+        "peak_bytes": 6283580
+      },
+      "report_unchanged": true
+    },
+    "distant": {
+      "after": {
+        "blocks": 3,
+        "seconds_min": 0.00013462500000027688,
+        "peak_bytes": 289646
+      }
+    }
+  }
+}

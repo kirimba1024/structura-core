@@ -6,11 +6,18 @@ from pathlib import Path
 
 import numpy as np
 from amulet_nbt import (
-    ByteArrayTag, CompoundTag, DoubleTag, IntArrayTag, IntTag, ListTag,
-    ShortTag, StringTag,
+    ByteArrayTag,
+    CompoundTag,
+    DoubleTag,
+    IntArrayTag,
+    IntTag,
+    ListTag,
+    ShortTag,
+    StringTag,
 )
 
-from .nbt import PathInput, Structure, state_key, write_root
+from .nbt_io import PathInput, write_root
+from .structure import Structure, state_key
 
 
 def _encode_varints(values):

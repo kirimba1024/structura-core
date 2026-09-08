@@ -88,15 +88,18 @@ allocations or total process memory. Invalid/truncated data raises `ValueError`.
 
 ```bash
 pip install 'structura-core[legacy]'
-structura-convert-legacy old.schematic preserved.nbt --preserve-layout --all-entities
+structura-convert-legacy old.schematic preserved.nbt --all-entities
 ```
 
-Python equivalents are `prepare_for_placement=False` and
-`preserve_all_entities=True` on `convert()`. They retain selection bounds,
-authored air, bedrock, connections and entity NBT with fractional positions.
-Historical defaults instead trim bounds, replace bedrock, repair panes/bars,
-select interior/door-clearance air, and retain paintings/item frames only.
-Custom entity namespaces and translated block-entity IDs are retained.
+Conversion preserves selection bounds, authored air, bedrock and connections.
+`preserve_all_entities=True` / `--all-entities` also retains every source entity;
+otherwise only paintings and item frames are retained. Custom namespaces,
+translated block-entity IDs and fractional entity positions are preserved.
+`--preserve-layout` remains accepted for compatibility.
+
+Geometric preparation is available through `structura-prepare-legacy` from
+[structura-geo](https://github.com/kirimba1024/structura-geo). It trims bounds,
+replaces bedrock, repairs panes/bars and selects interior/door-clearance air.
 
 Legacy defaults come from `structura_core.version`: Java 1.21.1. Callers can
 pass another Amulet target. The optional Bedrock adapter defaults to 1.21.0;
@@ -114,7 +117,8 @@ existing generation helpers available:
 
 ## Module responsibilities
 
-`nbt.py` owns Structure validation/serialization. `litematic.py`, `schematic.py`
+`structure.py` validates Structure data, `structure_writer.py` serializes it,
+and `nbt.py` re-exports their established entry points. `litematic.py`, `schematic.py`
 and `bedrock.py` adapt native documents; `bedrock_translation.py` isolates the
 optional translator; `formats.py` selects readers and `convert.py` supplies the
 CLI. Native readers retain IDs/properties without a second Minecraft registry.

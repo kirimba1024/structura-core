@@ -93,12 +93,12 @@ def test_bounded_raw_and_gzip_nbt_use_the_same_parser_contract(tmp_path):
 
 
 def test_expansion_limit_rejects_before_parser(monkeypatch):
-    from structura_core import nbt
+    from structura_core import nbt_io
 
     def unexpected_parser(*args, **kwargs):
         pytest.fail("oversized data reached NBT parser")
 
-    monkeypatch.setattr(nbt, "load_nbt", unexpected_parser)
+    monkeypatch.setattr(nbt_io, "load_nbt", unexpected_parser)
     with pytest.raises(ValueError, match="max_nbt_bytes"):
         Structure.from_bytes(gzip.compress(b"x" * 100_000), max_nbt_bytes=1024)
 

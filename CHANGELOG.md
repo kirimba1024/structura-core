@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.1
+
+- Move geometry, metrics, morphology and placement preparation to structura-geo.
+  Analysis imports now use `structura_geo`; its package supplies the analysis CLIs.
+- Remove SciPy from core dependencies. Legacy conversion preserves geometry by
+  default; `prepare_for_placement=True` reports the new geo entry point.
+- Pair this release with structura-geo 0.1.0, which requires core >=0.6.1,<0.7.
+  Existing data/conversion APIs retain the current render/edit dependency range.
+  Analysis imports and placement defaults require the explicit [migration](docs/migration-0.6.1.md).
+- Preserve formatted legacy sign components, existing translated text and literal
+  braces. Invalid JSON in an existing message no longer crashes conversion.
+- Split structure validation/writing, block states and world reading into modules
+  with explicit dependencies; validate world selections and local entity positions.
+- Run the complete applicable test suite for the base wheel without translation
+  extras, geo or SciPy.
+
 ## 0.6.0
 
 - Add bounded SNBT I/O through the existing conversion API.
