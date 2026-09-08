@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from itertools import product
 from math import floor, prod
 from pathlib import Path
+from typing import Optional
 
 from amulet_nbt import CompoundTag, IntTag, ListTag
 
@@ -25,6 +26,7 @@ class WorldRegion:
     center: tuple
     radius: int
     vertical_radius: int
+    sections: Optional[frozenset] = None
 
     def contains_column(self, x, z):
         return (x // 16, z // 16) in self.loaded
@@ -80,7 +82,7 @@ class JavaWorld:
         }))
         source.source_origin = origin
         palette = {"minecraft:air": 0}
-        loaded, missing, entities = set(), set(), []
+        loaded, missing, entities, sections = set(), set(), [], set()
         directory = self.dimensions[dimension]
         for x, z in product(range(cx - radius, cx + radius + 1), range(cz - radius, cz + radius + 1)):
             root = read_chunk(directory / "region", x, z)
@@ -88,6 +90,7 @@ class JavaWorld:
                 missing.add((x, z))
                 continue
             body = append_chunk(source, root, x, z, palette, max_blocks, decode_long_array)
+            sections.update((x, int(section["Y"]), z) for section in body.get("sections", ()) if "block_states" in section)
             if include_entities:
                 entities.extend(body.get("Entities", ()))
                 entity_chunk = read_chunk(directory / "entities", x, z)
@@ -99,4 +102,4 @@ class JavaWorld:
         source.entities, notices = local_entities(entities, dimension, origin, size)
         source.validate()
         return WorldRegion(source, frozenset(loaded), frozenset(missing), notices,
-                           dimension, center, radius, vertical_radius)
+                           dimension, center, radius, vertical_radius, frozenset(sections))

@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-world = ["amulet-core>=1.9.35,<2"]
+world = ["amulet-core>=1.9.35,<2", "portalocker>=2.4,<3"]
 legacy = ["amulet-core>=1.9,<2"]
 bedrock = ["amulet-core>=1.9.35,<2"]
 

@@ -4,6 +4,9 @@
 
 Validated structure data, native format I/O and explicit conversion-loss reporting. Native formats need no Amulet Core translation engine.
 
+The optional `[world]` extra reads bounded Java world regions and supports
+[explicit block patches with backups](docs/world-writing.md) in Java 1.18+ saves.
+
 ## Quick start
 
 ```bash
