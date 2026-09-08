@@ -64,7 +64,7 @@ def convert_structure(source: Union[str, PathLike[str], Structure], output: Unio
                    else document.to_structure(max_blocks=max_blocks, data_version=source_data_version))
         else:
             src = load_structure(source, region=region, palette_index=palette_index,
-                                 max_blocks=max_blocks, max_nbt_bytes=max_nbt_bytes)
+                                 max_blocks=max_blocks, max_nbt_bytes=max_nbt_bytes, strict=strict)
     losses = (document_losses(document, region) if target == ".mcstructure" else
               conversion_losses(document, src, ".nbt" if target == ".snbt" else target, region))
     if target not in {".nbt", ".snbt"}:

@@ -12,7 +12,7 @@ from .nbt_io import load_root
 from .structure import Structure
 from .validation import vector
 from .world_chunks import append_chunk
-from .world_entities import dimension_id, local_entities, player_entities
+from .world_entities import EntityLocation, dimension_id, local_entities, player_entities
 from .world_io import read_chunk as read_chunk
 
 
@@ -27,6 +27,7 @@ class WorldRegion:
     radius: int
     vertical_radius: int
     sections: Optional[frozenset] = None
+    entity_locations: tuple = ()
 
     def contains_column(self, x, z):
         return (x // 16, z // 16) in self.loaded
@@ -92,14 +93,16 @@ class JavaWorld:
             body = append_chunk(source, root, x, z, palette, max_blocks, decode_long_array)
             sections.update((x, int(section["Y"]), z) for section in body.get("sections", ()) if "block_states" in section)
             if include_entities:
-                entities.extend(body.get("Entities", ()))
+                location = EntityLocation(dimension, "region", (x, z))
+                entities.extend((payload, location) for payload in body.get("Entities", ()))
                 entity_chunk = read_chunk(directory / "entities", x, z)
                 if entity_chunk is not None:
-                    entities.extend(entity_chunk.get("Entities", ()))
+                    location = EntityLocation(dimension, "entities", (x, z))
+                    entities.extend((payload, location) for payload in entity_chunk.get("Entities", ()))
             loaded.add((x, z))
         if include_entities:
-            entities.extend(player_entities(self.path, self.data))
-        source.entities, notices = local_entities(entities, dimension, origin, size)
+            entities.extend(player_entities(self.path, self.data, located=True))
+        source.entities, notices, locations = local_entities(entities, dimension, origin, size, located=True)
         source.validate()
         return WorldRegion(source, frozenset(loaded), frozenset(missing), notices,
-                           dimension, center, radius, vertical_radius, frozenset(sections))
+                           dimension, center, radius, vertical_radius, frozenset(sections), locations)

@@ -41,6 +41,19 @@ class StagedWorld:
             shutil.copy2(before, staged)
         self.originals[relative] = stamp
 
+    def file(self, path):
+        self._copy(path)
+        return self.temporary / "after" / path.relative_to(self.world)
+
+    def write_file(self, path, root):
+        from .nbt_io import load_root, write_root
+
+        staged = self.file(path)
+        write_root(root, staged)
+        if load_root(staged) != root:
+            raise OSError(f"Staged NBT verification failed: {path.name}")
+        self.changed.add(path.relative_to(self.world))
+
     def region(self, directory, cx, cz):
         self._copy(directory / f"r.{cx // 32}.{cz // 32}.mca")
         self._copy(directory / f"c.{cx}.{cz}.mcc")
@@ -89,6 +102,7 @@ class StagedWorld:
                 if source.exists():
                     with source.open("rb") as stream:
                         os.fsync(stream.fileno())
+                    target.parent.mkdir(parents=True, exist_ok=True)
                     os.replace(source, target)
                 else:
                     target.unlink(missing_ok=True)

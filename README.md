@@ -5,7 +5,7 @@
 Validated structure data, native format I/O and explicit conversion-loss reporting. Native formats need no Amulet Core translation engine.
 
 The optional `[world]` extra reads bounded Java world regions and supports
-[explicit block patches with backups](docs/world-writing.md) in Java 1.18+ saves.
+[explicit block/entity patches with backups](docs/world-writing.md) in Java 1.18+ saves.
 
 ## Quick start
 
@@ -25,9 +25,9 @@ structura-convert house.nbt house.snbt --strict
 | Litematic `.litematic` | v5–v7; named regions | new v5/v7; native copies retain their version | base |
 | Sponge `.schem` | v1–v3 | new v2; native copies retain their version | base |
 | Bedrock `.mcstructure` | v1 native document | v1 native document / copy | base; `[bedrock]` for conversion to/from Java |
-| Legacy `.schematic` | `structura-convert-legacy` | no legacy writer | `[legacy]` |
+| Legacy `.schematic` | `load_structure`, `structura-convert`, `structura-convert-legacy` | no legacy writer | `[legacy]` |
 
-`structura-convert` converts among the first five formats. Java/Bedrock
+`structura-convert` reads all six formats and writes the first five. Java/Bedrock
 translation needs `[bedrock]` and can be lossy. Sponge v1 without a DataVersion
 requires `--source-data-version` when converting to another format; supply the
 source game's version, not the desired target.
@@ -64,6 +64,9 @@ structura-convert house.nbt house.mcstructure --target-version 1.21.0
 
 For old `.schematic` files, install `[legacy]` and use
 `structura-convert-legacy old.schematic house.nbt --all-entities`.
+The shared `load_structure` and `structura-convert` entry points also accept
+`.schematic`, retain all source entities, enforce their normal allocation limits
+and report normalization losses; strict mode rejects the conversion before writing.
 The legacy converter defaults to Java 1.21.1 and preserves selection bounds, air,
 materials and connections. `--all-entities` retains every source entity; otherwise
 only paintings and item frames are carried. Placement preparation belongs to

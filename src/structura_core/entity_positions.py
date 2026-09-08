@@ -27,10 +27,19 @@ def shift_entity(record, shift):
     ])
     if any(shift):
         nbt = result["nbt"]
+        _shift_payload(nbt, shift)
         if "Pos" in nbt:
             nbt["Pos"] = deepcopy(result["pos"])
-        if str(nbt.get("id", "")) in HANGING_ENTITIES:
-            for axis, delta in zip(("TileX", "TileY", "TileZ"), shift):
-                if axis in nbt:
-                    nbt[axis] = IntTag(int32(int32(nbt[axis], axis) + delta, f"shifted entity {axis}"))
     return result
+
+
+def _shift_payload(nbt, shift):
+    if "Pos" in nbt:
+        position = vector(nbt["Pos"], "entity position", integer=False)
+        nbt["Pos"] = ListTag([DoubleTag(v + delta) for v, delta in zip(position, shift)])
+    if str(nbt.get("id", "")) in HANGING_ENTITIES:
+        for axis, delta in zip(("TileX", "TileY", "TileZ"), shift):
+            if axis in nbt:
+                nbt[axis] = IntTag(int32(int32(nbt[axis], axis) + delta, f"shifted entity {axis}"))
+    for passenger in nbt.get("Passengers", ()):
+        _shift_payload(passenger, shift)

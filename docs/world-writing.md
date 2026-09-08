@@ -20,6 +20,22 @@ of `(blockstate, block_entity_snbt_or_none)`, before and after. NBT coordinates
 are ignored for comparison and replaced with the destination coordinates when
 writing. Ordinary entities, biomes and unrelated chunk NBT are retained.
 
+The optional `entities=` argument accepts `world_entity_write.EntityPatch` records.
+Each contains a before/after SNBT payload and `world_entities.EntityLocation`
+(dimension, storage, chunk or player file). Payload positions use world coordinates.
+`WorldRegion.entity_locations` corresponds to the loaded structure's entity list.
+Changing a payload updates the existing entity; changing the destination chunk moves
+it. A missing before payload creates an entity, and a missing after payload deletes it.
+Destinations must contain terrain chunks. UUIDs and original payloads are checked
+against fresh disk data; already-applied changes are accepted, conflicts abort Save.
+Entities without UUIDs are matched by their full original payload.
+
+Player records retain their original `level.dat` or `playerdata` storage. They can be
+edited, including inventories, but cannot be created or deleted through this API.
+Editing the local player also updates a matching playerdata profile when its baseline
+agrees. Unknown mod fields remain intact. Player files and entity regions use the same
+staging, read-back validation, hash checks and backups as block changes.
+
 `world_patch` groups changes by section, decodes each palette once and updates
 only requested cells. `world_staging` uses Amulet's AnvilRegionInterface to
 write copied region files and reads staged chunks back for verification.

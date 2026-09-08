@@ -56,7 +56,9 @@ Requesting `prepare_for_placement=True` points callers to
 | `world` | World metadata, dimensions, region selection and read orchestration. |
 | `world_io` | Read Anvil chunk locations and internal/external chunk payloads. |
 | `world_chunks` | Decode section states, merge palettes and localize block entities. No file I/O. |
-| `world_entities` | Player discovery, entity filtering/deduplication and local records. |
+| `world_entities` | Player discovery, entity filtering/deduplication, local records and storage locations. |
+| `world_entity_write` | Compare and stage entity/player changes, preserving unknown NBT and original storage. |
+| `world_write`, `world_staging` | Explicit block/entity save orchestration, staged regions/files, conflict checks and backups. |
 
 `world.read_chunk`, `JavaWorld` and `WorldRegion` retain their import paths.
 Amulet remains optional and is loaded at the world-reading boundary. The decoder

@@ -105,3 +105,28 @@ def test_failed_conversion_restores_amulet_logger(tmp_path, monkeypatch):
     with pytest.raises(OSError, match="cannot open"):
         convert("missing", str(tmp_path / "output.nbt"), 3955)
     assert logger.level == original
+
+
+def test_shared_loader_preserves_legacy_entities_and_enforces_limits(tmp_path, monkeypatch):
+    from structura_core import convert_structure, load_structure
+    from structura_core.conversion_losses import ConversionWarning
+
+    monkeypatch.setenv("AMULET_LEVEL_CACHE_DIR", str(tmp_path / "cache"))
+    path = legacy_file(tmp_path)
+    original = path.read_bytes()
+    with pytest.warns(ConversionWarning, match="Legacy schematic"):
+        source = load_structure(path)
+    assert source.size == (3, 3, 3)
+    assert source.name_at((2, 1, 1)) == "minecraft:bedrock"
+    assert len(source.block_nbt[(0, 1, 1)]["Items"]) == 1
+    assert str(source.entities[0]["nbt"]["id"]) == "example:item_frame"
+    with pytest.raises(ValueError, match="Legacy schematic"):
+        load_structure(path, strict=True)
+    output = tmp_path / "strict.nbt"
+    output.write_bytes(b"keep")
+    with pytest.raises(ValueError, match="Legacy schematic"):
+        convert_structure(path, output, strict=True)
+    assert output.read_bytes() == b"keep"
+    with pytest.warns(ConversionWarning), pytest.raises(ValueError, match="max_blocks"):
+        load_structure(path, max_blocks=26)
+    assert path.read_bytes() == original

@@ -2,12 +2,16 @@
 
 from pathlib import Path
 from typing import Optional, Tuple
+import warnings
 
 from .limits import DEFAULT_MAX_BLOCKS, DEFAULT_MAX_NBT_BYTES
 from .litematic import Litematic
 from .nbt_io import PathInput
 from .schematic import Schematic
 from .structure import Structure
+from .version import JAVA_VERSION
+
+STRUCTURE_SUFFIXES = (".nbt", ".snbt", ".litematic", ".schem", ".mcstructure", ".schematic")
 
 
 def load_structure(path: PathInput, *, region: Optional[str] = None, palette_index: int = 0,
@@ -20,6 +24,22 @@ def load_structure(path: PathInput, *, region: Optional[str] = None, palette_ind
         raise ValueError("source_data_version applies only to Sponge input")
     if target_version is not None and path.suffix.lower() != ".mcstructure":
         raise ValueError("target_version applies only to Bedrock input")
+    if path.suffix.lower() == ".schematic":
+        from .conversion_losses import ConversionWarning
+
+        if region is not None or palette_index != 0:
+            raise ValueError("Legacy input has one palette and no named regions")
+        version = ".".join(map(str, JAVA_VERSION))
+        message = f"Legacy schematic is normalized to Java {version}; legacy format metadata is not retained"
+        if strict:
+            raise ValueError(message)
+        try:
+            from .convert_legacy import read_legacy
+        except ImportError as error:
+            raise ImportError("Legacy .schematic input requires structura-core[legacy]") from error
+        warnings.warn(message, ConversionWarning, stacklevel=2)
+        root, _ = read_legacy(str(path), max_blocks=max_blocks, max_nbt_bytes=max_nbt_bytes)
+        return Structure.from_root(root)
     if path.suffix.lower() == ".mcstructure":
         from .bedrock import Mcstructure
 
@@ -36,7 +56,7 @@ def load_structure(path: PathInput, *, region: Optional[str] = None, palette_ind
             raise ValueError("Sponge input has one palette and no named regions")
         return Schematic(path, max_nbt_bytes=max_nbt_bytes).to_structure(max_blocks=max_blocks, data_version=source_data_version)
     if path.suffix.lower() not in {".nbt", ".snbt"}:
-        raise ValueError(f"unsupported native input {path.suffix!r}; expected .nbt, .snbt, .litematic, .schem or .mcstructure")
+        raise ValueError(f"unsupported input {path.suffix!r}; expected {', '.join(STRUCTURE_SUFFIXES)}")
     if region is not None:
         raise ValueError("region applies only to Litematic input")
     return Structure(path, palette_index=palette_index, max_nbt_bytes=max_nbt_bytes)

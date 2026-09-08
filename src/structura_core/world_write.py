@@ -9,10 +9,10 @@ from .world_patch import invalidate_poi, patch_chunk
 from .world_staging import StagedWorld
 
 
-def save_world_patch(path, patch):
+def save_world_patch(path, patch, *, entities=()):
     from portalocker import Lock
 
-    if not patch:
+    if not patch and not entities:
         return None
     world = JavaWorld(path)
     if world.data_version < 2844:
@@ -43,4 +43,8 @@ def save_world_patch(path, patch):
                 poi_root = read_chunk(staged_poi, cx, cz)
                 if poi_root is not None and invalidate_poi(poi_root, sections):
                     stage.write(staged_poi, cx, cz, poi_root)
+        if entities:
+            from .world_entity_write import stage_entity_changes
+
+            stage_entity_changes(world, stage, entities)
         return stage.install()

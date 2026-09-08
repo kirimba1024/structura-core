@@ -1,4 +1,6 @@
+from dataclasses import dataclass
 from math import floor
+from typing import Optional
 
 from amulet_nbt import CompoundTag, DoubleTag, IntTag, ListTag, StringTag
 
@@ -7,23 +9,36 @@ from .nbt_io import load_root
 from .validation import vector
 
 
+@dataclass(frozen=True)
+class EntityLocation:
+    dimension: str
+    storage: str
+    chunk: Optional[tuple] = None
+    file: Optional[str] = None
+
+
 def dimension_id(value):
     value = str(value)
     return {"0": "minecraft:overworld", "-1": "minecraft:the_nether", "1": "minecraft:the_end"}.get(value, value)
 
 
-def player_entities(path, data):
+def player_entities(path, data, *, located=False):
     local_player = data.get("Player")
     if local_player is not None:
-        yield {**local_player, "id": StringTag("minecraft:player")}
+        payload = {**local_player, "id": StringTag("minecraft:player")}
+        location = EntityLocation(dimension_id(payload.get("Dimension", "minecraft:overworld")), "player", file="level.dat")
+        yield (payload, location) if located else payload
     for file in sorted((path / "playerdata").glob("*.dat")):
-        yield {**load_root(file), "id": StringTag("minecraft:player")}
+        payload = {**load_root(file), "id": StringTag("minecraft:player")}
+        location = EntityLocation(dimension_id(payload.get("Dimension", "minecraft:overworld")), "player", file=str(file.relative_to(path)))
+        yield (payload, location) if located else payload
 
 
-def local_entities(payloads, dimension, origin, size):
-    entities, notices, seen = [], [], set()
+def local_entities(payloads, dimension, origin, size, *, located=False):
+    entities, notices, seen, locations = [], [], set(), []
     shift = tuple(-value for value in origin)
-    for payload in payloads:
+    for item in payloads:
+        payload, location = item if located else (item, None)
         if dimension_id(payload.get("Dimension", dimension)) != dimension:
             continue
         try:
@@ -48,4 +63,6 @@ def local_entities(payloads, dimension, origin, size):
             "nbt": CompoundTag(dict(payload)),
         })
         entities.append(shift_entity(record, shift))
-    return entities, tuple(dict.fromkeys(notices))
+        locations.append(location)
+    result = entities, tuple(dict.fromkeys(notices))
+    return (*result, tuple(locations)) if located else result

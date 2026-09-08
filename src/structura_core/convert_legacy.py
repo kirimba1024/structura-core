@@ -1,4 +1,5 @@
 import argparse
+from math import prod
 
 from .legacy_blocks import (
     amulet as amulet,
@@ -18,6 +19,7 @@ from .legacy_entities import (
     restore_sign_text,
 )
 from .nbt_io import load_root, write_root
+from .limits import DEFAULT_MAX_BLOCKS, DEFAULT_MAX_NBT_BYTES, check_volume
 from .validation import int32
 from .version import DATA_VERSION, JAVA_VERSION
 
@@ -27,39 +29,42 @@ def _structure_root(data, entities, data_version):
     return structure_root(data, records, data_version)
 
 
-def convert(
-    src_path: str,
-    dst_path: str,
-    data_version: int,
-    target_version=JAVA_VERSION,
-    quiet_errors: bool = True,
-    preserve_all_entities: bool = False,
-    *,
-    prepare_for_placement: bool = False,
-):
-    """Translate legacy input while preserving selection geometry and materials."""
-    if prepare_for_placement:
-        raise ValueError("Placement preparation moved to structura_geo.convert_legacy.convert")
+def read_legacy(src_path, data_version=DATA_VERSION, target_version=JAVA_VERSION, *,
+                quiet_errors=True, preserve_all_entities=True, max_blocks=DEFAULT_MAX_BLOCKS,
+                max_nbt_bytes=DEFAULT_MAX_NBT_BYTES):
     data_version = int32(data_version, "DataVersion")
     if len(target_version) != 3 or any(part < 0 for part in target_version):
         raise ValueError(f"invalid Java target version: {target_version!r}")
     target_version = tuple(int32(part, "Java version component") for part in target_version)
     with open_legacy(src_path, quiet_errors) as level:
+        bounds = level.bounds(level.dimensions[0])
+        if max_blocks is not None:
+            check_volume(prod(hi - lo for lo, hi in zip(bounds.min, bounds.max)), max_blocks)
+        legacy_root = load_root(src_path, max_nbt_bytes=max_nbt_bytes)
         data = read_blocks(level, ("java", target_version), omit_air=False, replacements={})
-        legacy_root = load_root(src_path)
         entities = _legacy_entities(legacy_root, preserve_all_entities)
         legacy_text = _legacy_tile_text(legacy_root)
         restored = restore_sign_text(data.blocks, legacy_text, (0, 0, 0))
-        print(f"    sign text restored: {restored}")
         root = _structure_root(data, entities, data_version)
-        print(f"    entities carried: {len(root['entities'])}")
-        write_root(root, dst_path)
-        print(f"OK  {src_path}")
-        print(f"    -> {dst_path}")
-        print(f"    size: {'x'.join(map(str, data.size))}")
-        print(f"    palette entries: {len(data.palette_list)}")
-        print(f"    blocks written: {len(data.blocks)}")
-        print(f"    block entities: {data.block_entities_count}")
+        return root, restored
+
+
+def convert(src_path: str, dst_path: str, data_version: int, target_version=JAVA_VERSION,
+            quiet_errors: bool = True, preserve_all_entities: bool = False, *,
+            prepare_for_placement: bool = False):
+    if prepare_for_placement:
+        raise ValueError("Placement preparation moved to structura_geo.convert_legacy.convert")
+    root, restored = read_legacy(src_path, data_version, target_version, quiet_errors=quiet_errors,
+                                 preserve_all_entities=preserve_all_entities, max_blocks=None)
+    print(f"    sign text restored: {restored}")
+    print(f"    entities carried: {len(root['entities'])}")
+    write_root(root, dst_path)
+    print(f"OK  {src_path}")
+    print(f"    -> {dst_path}")
+    print(f"    size: {'x'.join(str(int(v)) for v in root['size'])}")
+    print(f"    palette entries: {len(root['palette'])}")
+    print(f"    blocks written: {len(root['blocks'])}")
+    print(f"    block entities: {sum('nbt' in record for record in root['blocks'])}")
 
 
 def main():
