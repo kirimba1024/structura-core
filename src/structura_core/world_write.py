@@ -9,7 +9,7 @@ from .world_patch import invalidate_poi, patch_chunk
 from .world_staging import StagedWorld
 
 
-def save_world_patch(path, patch, *, entities=()):
+def save_world_patch(path, patch, *, entities=(), force=False):
     from portalocker import Lock
 
     if not patch and not entities:
@@ -33,7 +33,7 @@ def save_world_patch(path, patch, *, entities=()):
             root = read_chunk(region, cx, cz)
             if root is None:
                 raise ValueError(f"Destination chunk is absent at {cx}, {cz}")
-            sections = patch_chunk(root, cx, cz, changes)
+            sections = patch_chunk(root, cx, cz, changes, force=force)
             if not sections:
                 continue
             stage.write(region, cx, cz, root)
@@ -48,3 +48,49 @@ def save_world_patch(path, patch, *, entities=()):
 
             stage_entity_changes(world, stage, entities)
         return stage.install()
+
+
+def world_conflicts(path, patch):
+    from amulet.utils.world_utils import decode_long_array
+    from amulet_nbt import from_snbt
+
+    from .blockstates import parse_state, state_key
+    from .world_chunks import _section_states
+    from .world_patch import normalized_cell
+
+    world = JavaWorld(path)
+    grouped = defaultdict(dict)
+    for (dimension, x, y, z), pair in patch.items():
+        if dimension not in world.dimensions:
+            raise ValueError(f"Unknown dimension: {dimension}")
+        grouped[dimension, x // 16, z // 16][x, y, z] = pair
+    conflicts = []
+    for (dimension, cx, cz), changes in grouped.items():
+        root = read_chunk(world.dimensions[dimension] / "region", cx, cz)
+        if root is None:
+            conflicts.extend((position, pair[0][0], "absent chunk", pair[1][0])
+                             for position, pair in sorted(changes.items()))
+            continue
+        version = int(root.get("DataVersion", 0))
+        entities = {tuple(int(entity[axis]) for axis in "xyz"): entity for entity in root.get("block_entities", ())}
+        sections = {int(section["Y"]): section for section in root.get("sections", ())}
+        by_section = defaultdict(list)
+        for position, pair in changes.items():
+            by_section[position[1] // 16].append((position, pair))
+        for cy, entries in sorted(by_section.items()):
+            section = sections.get(cy)
+            palette = indices = None
+            if section is not None and "block_states" in section:
+                palette, indices = _section_states(section, version, decode_long_array)
+                keys = [state_key(entry) for entry in palette]
+            for position, (before, after) in sorted(entries):
+                x, y, z = position
+                if indices is None:
+                    conflicts.append((position, before[0], "absent section", after[0]))
+                    continue
+                index = x % 16 + 16 * (z % 16) + 256 * (y % 16)
+                current = normalized_cell(keys[int(indices[index])], entities.get(position))
+                expected = normalized_cell(state_key(parse_state(before[0])), from_snbt(before[1]) if before[1] else None)
+                if current != expected:
+                    conflicts.append((position, before[0], current[0], after[0]))
+    return conflicts

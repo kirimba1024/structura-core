@@ -120,3 +120,47 @@ def test_partial_install_keeps_backups_and_can_be_retried(editable_world, monkey
     assert manifest["installed"] == ["poi/r.0.0.mca"]
     monkeypatch.setattr(world_staging.os, "replace", replace)
     assert save_world_patch(world.path, patch()).is_dir()
+
+
+def test_world_conflicts_lists_only_changed_positions(editable_world):
+    from structura_core.world_write import world_conflicts
+
+    world = editable_world
+    changes = patch()
+    changes.update({("minecraft:overworld", 1, 0, 0): (("minecraft:dirt", None), ("minecraft:glass", None))})
+    conflicts = world_conflicts(world.path, changes)
+    assert conflicts == [((1, 0, 0), "minecraft:dirt", "minecraft:stone", "minecraft:glass")]
+
+
+def test_force_write_overwrites_conflicting_disk_state(editable_world):
+    from structura_core.world_write import world_conflicts
+
+    world = editable_world
+    changes = patch()
+    changes.update({("minecraft:overworld", 1, 0, 0): (("minecraft:dirt", None), ("minecraft:glass", None))})
+    assert len(world_conflicts(world.path, changes)) == 1
+    save_world_patch(world.path, changes, force=True)
+    source = world.read_region((0, 8, 0), radius=0, vertical_radius=16).structure
+    assert source.name_at((0, -source.source_origin[1], 0)) == "minecraft:gold_block"
+    assert source.name_at((1, -source.source_origin[1], 0)) == "minecraft:glass"
+
+
+def test_backup_listing_verify_and_restore(editable_world):
+    from structura_core.world_staging import list_backups, restore_backup, verify_backup
+
+    world = editable_world
+    target = world.path / "region/r.0.0.mca"
+    original = target.read_bytes()
+    save_world_patch(world.path, patch())
+    modified = target.read_bytes()
+    assert modified != original
+    backups = list_backups(world.path)
+    assert len(backups) == 1 and backups[0]["files"]
+    backup = backups[0]["path"]
+    assert verify_backup(backup)
+    result = restore_backup(world.path, backup)
+    assert result["restored"] == len(backups[0]["files"])
+    assert target.read_bytes() == original
+    safety = list_backups(world.path)[0]
+    assert safety["name"].endswith(result["safety"].split("/")[-1]) or "restore" in safety["name"]
+    assert restore_backup(world.path, backup)["restored"] >= 1

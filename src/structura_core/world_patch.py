@@ -18,7 +18,7 @@ def normalized_cell(state, payload):
     return state, payload
 
 
-def patch_chunk(root, cx, cz, changes):
+def patch_chunk(root, cx, cz, changes, force=False):
     from amulet.utils.world_utils import decode_long_array, encode_long_array
 
     canonical = lru_cache(maxsize=4096)(lambda state: state_key(parse_state(state)))
@@ -58,7 +58,7 @@ def patch_chunk(root, cx, cz, changes):
             if current == desired:
                 continue
             expected = normalized_cell(canonical(before[0]), from_snbt(before[1]) if before[1] else None)
-            if current != expected:
+            if current != expected and not force:
                 raise ValueError(f"World changed at {position}; refresh and resolve the conflicting edit before saving")
             state = canonical(after[0])
             if state not in lookup:
