@@ -99,7 +99,7 @@ def test_concurrent_writer_is_detected_after_preparation(editable_world, monkeyp
     assert len(root["sections"][0]["block_states"]["palette"]) == 1
 
 
-def test_partial_install_keeps_backups_and_can_be_retried(editable_world, monkeypatch):
+def test_partial_install_requires_recovery_before_next_save(editable_world, monkeypatch):
     import json
     from structura_core import world_staging
 
@@ -119,6 +119,9 @@ def test_partial_install_keeps_backups_and_can_be_retried(editable_world, monkey
     manifest = json.loads((backup / "manifest.json").read_text())
     assert manifest["installed"] == ["poi/r.0.0.mca"]
     monkeypatch.setattr(world_staging.os, "replace", replace)
+    with pytest.raises(ValueError, match="unfinished save"):
+        save_world_patch(world.path, patch())
+    world_staging.restore_backup(world.path, backup)
     assert save_world_patch(world.path, patch()).is_dir()
 
 
@@ -164,3 +167,14 @@ def test_backup_listing_verify_and_restore(editable_world):
     safety = list_backups(world.path)[0]
     assert safety["name"].endswith(result["safety"].split("/")[-1]) or "restore" in safety["name"]
     assert restore_backup(world.path, backup)["restored"] >= 1
+
+
+def test_save_patches_fresh_chunk_without_replacing_unrelated_new_blocks(editable_world):
+    world = editable_world
+    old_changes = patch((0, 0, 0), 'minecraft:gold_block')
+    save_world_patch(world.path, patch((2, 0, 0), 'minecraft:diamond_block'))
+    save_world_patch(world.path, old_changes)
+    source = world.read_region((0, 8, 0), radius=0, vertical_radius=16).structure
+    y = -source.source_origin[1]
+    assert source.name_at((0, y, 0)) == 'minecraft:gold_block'
+    assert source.name_at((2, y, 0)) == 'minecraft:diamond_block'

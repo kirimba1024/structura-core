@@ -1,6 +1,6 @@
 from copy import deepcopy
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Dict, List, MutableMapping, Optional, Set, Tuple, Union
 
 from amulet_nbt import CompoundTag, ListTag
 
@@ -14,6 +14,7 @@ from .blockstates import (
 from .limits import DEFAULT_MAX_NBT_BYTES
 from .nbt_io import PathInput, load_root, read_root
 from .validation import int32 as _integer, vector as _vector
+from .block_array import BlockArray
 
 Position = Tuple[int, int, int]
 State = Union[int, str]
@@ -28,7 +29,7 @@ class Structure:
     palette_index: int
     palette: List[str]
     palettes_raw: List[List[CompoundTag]]
-    present: Dict[Position, int]
+    present: MutableMapping[Position, int]
     block_nbt: Dict[Position, CompoundTag]
     entities: List[CompoundTag]
 
@@ -122,7 +123,17 @@ class Structure:
                 raise ValueError(f"palettes must have equal lengths in {self.path}")
             _validate_palette(palette, str(self.path))
         self.palette = [str(entry["Name"]) for entry in self.palette_raw]
-        for pos, index in self.present.items():
+        sx, sy, sz = self.size
+        palette_size = min(len(self.palette), 2 ** 31)
+        if isinstance(self.present, BlockArray):
+            self.present.validate(self.size, palette_size)
+        for pos, index in (() if isinstance(self.present, BlockArray) else self.present.items()):
+            if type(pos) is tuple and len(pos) == 3:
+                x, y, z = pos
+                if (type(x) is int and type(y) is int and type(z) is int and type(index) is int
+                        and 0 <= x < sx and 0 <= y < sy and 0 <= z < sz
+                        and 0 <= index < palette_size):
+                    continue
             _vector(pos, "block position")
             _integer(index, "block state index")
             if len(pos) != 3 or not all(
@@ -131,7 +142,7 @@ class Structure:
                 raise ValueError(f"block {pos} is outside {self.size} in {self.path}")
             if not 0 <= index < len(self.palette):
                 raise ValueError(f"palette index {index} is invalid in {self.path}")
-        dangling = self.block_nbt.keys() - self.present.keys()
+        dangling = {position for position in self.block_nbt if position not in self.present}
         if dangling:
             raise ValueError(
                 f"block entities without blocks in {self.path}: {sorted(dangling)[:3]}"

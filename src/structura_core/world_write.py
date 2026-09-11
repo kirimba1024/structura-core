@@ -7,6 +7,8 @@ from .world import JavaWorld
 from .world_io import read_chunk
 from .world_patch import invalidate_poi, patch_chunk
 from .world_staging import StagedWorld
+from .compatibility import world_write_reason
+from .world_backup import require_complete_save
 
 
 def save_world_patch(path, patch, *, entities=(), force=False):
@@ -15,8 +17,9 @@ def save_world_patch(path, patch, *, entities=(), force=False):
     if not patch and not entities:
         return None
     world = JavaWorld(path)
-    if world.data_version < 2844:
-        raise ValueError("World writing requires Java 1.18 or newer")
+    reason = world_write_reason(world.data_version)
+    if reason:
+        raise ValueError(reason)
     grouped = defaultdict(dict)
     for (dimension, x, y, z), pair in patch.items():
         x, y, z = vector((x, y, z), "world position")
@@ -26,6 +29,7 @@ def save_world_patch(path, patch, *, entities=(), force=False):
     work = world.path / ".structura"
     work.mkdir(exist_ok=True)
     with Lock(str(work / "write.lock"), mode="a+b", timeout=0), TemporaryDirectory(prefix="save-", dir=work) as temporary:
+        require_complete_save(world.path)
         stage = StagedWorld(world.path, Path(temporary))
         for (dimension, cx, cz), changes in grouped.items():
             directory = world.dimensions[dimension]

@@ -5,6 +5,7 @@ from amulet_nbt import IntTag
 
 from .blockstates import AIR_NAMES, state_key, validate_palette
 from .validation import compound_list, int32, vector
+from .block_array import BlockArray
 
 
 def _section_states(section, version, decode_states):
@@ -59,10 +60,16 @@ def append_chunk(source, root, cx, cz, palette, max_blocks, decode_states):
         visible = np.array([str(entry["Name"]) not in AIR_NAMES for entry in entries])[indices]
         if len(source.present) + int(visible.sum()) > max_blocks:
             raise ValueError("World view exceeds the block budget; reduce the radius")
-        for index in np.flatnonzero(visible):
-            pos = (cx * 16 + int(index % 16) - origin[0], y + int(index // 256) - origin[1],
-                   cz * 16 + int(index // 16 % 16) - origin[2])
-            source.present[pos] = remap[indices[index]]
+        mapped = np.asarray(remap, dtype=np.int32)[indices]
+        if isinstance(source.present, BlockArray):
+            grid = np.where(visible, mapped, -1).reshape(16, 16, 16).transpose(2, 0, 1)
+            lower = (cx * 16 - origin[0], y - origin[1], cz * 16 - origin[2])
+            source.present.set_region(lower, grid)
+            continue
+        for index in np.flatnonzero(visible).tolist():
+            pos = (cx * 16 + index % 16 - origin[0], y + index // 256 - origin[1],
+                   cz * 16 + index // 16 % 16 - origin[2])
+            source.present[pos] = int(mapped[index])
     for payload in body.get("block_entities", body.get("TileEntities", ())):
         world_pos = vector((payload[axis] for axis in "xyz"), "block entity position")
         pos = tuple(value - offset for value, offset in zip(world_pos, origin))

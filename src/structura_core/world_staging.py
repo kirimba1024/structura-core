@@ -1,22 +1,10 @@
-import hashlib
-import json
-import os
+import os as os
 import shutil
-from datetime import datetime, timezone
-from pathlib import Path
-from uuid import uuid4
 
 from amulet_nbt import NamedTag
 
-
-def digest(path):
-    if not path.exists():
-        return None
-    result = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            result.update(block)
-    return result.hexdigest()
+from .world_backup import digest as digest, install_staged
+from .world_backup import list_backups as list_backups, restore_backup as restore_backup, verify_backup as verify_backup
 
 
 class StagedWorld:
@@ -25,6 +13,7 @@ class StagedWorld:
         self.temporary = temporary
         self.originals = {}
         self.changed = set()
+        self.regions = {}
 
     def _copy(self, path):
         relative = path.relative_to(self.world)
@@ -64,11 +53,12 @@ class StagedWorld:
         from amulet.level.formats.anvil_world.region import AnvilRegionInterface
 
         path = directory / f"r.{cx // 32}.{cz // 32}.mca"
-        interface = AnvilRegionInterface(str(path), mcc=True)
+        if path not in self.regions:
+            self.regions[path] = AnvilRegionInterface(str(path), mcc=True)
+        interface = self.regions[path]
         interface.write_data(cx % 32, cz % 32, NamedTag(root))
         if interface.get_data(cx % 32, cz % 32).compound != root:
             raise OSError(f"Staged chunk verification failed at {cx}, {cz}")
-        interface.unload()
         relative = path.relative_to(self.temporary / "after")
         self.changed.add(relative)
         external = relative.parent / f"c.{cx}.{cz}.mcc"
@@ -81,106 +71,8 @@ class StagedWorld:
                 raise ValueError(f"World changed while saving {relative}; retry Save")
 
     def install(self):
-        if not self.changed:
-            return None
+        for interface in self.regions.values():
+            interface.unload()
+        self.regions.clear()
         self._check()
-        name = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid4().hex[:8]
-        backup = self.world / ".structura" / "backups" / name
-        backup.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(self.temporary / "before"), backup)
-        manifest = {"files": {str(path): self.originals[path] for path in sorted(self.changed)}, "installed": []}
-        record = backup / "manifest.json"
-        record.write_text(json.dumps(manifest, indent=2))
-        try:
-            self._check()
-            ordered = sorted(self.changed, key=lambda path: (
-                2 if not (self.temporary / "after" / path).exists() else 1 if path.suffix == ".mca" else 0, str(path)))
-            for relative in ordered:
-                source = self.temporary / "after" / relative
-                target = self.world / relative
-                if digest(target) != self.originals[relative]:
-                    raise ValueError(f"World changed while saving {relative}")
-                if source.exists():
-                    with source.open("rb") as stream:
-                        os.fsync(stream.fileno())
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    os.replace(source, target)
-                else:
-                    target.unlink(missing_ok=True)
-                manifest["installed"].append(str(relative))
-                record.write_text(json.dumps(manifest, indent=2))
-        except Exception as error:
-            raise OSError(f"World save interrupted; pending edits retained. Backup: {backup}. {error}") from error
-        return backup
-
-
-def list_backups(world):
-    root = Path(world) / ".structura" / "backups"
-    if not root.is_dir():
-        return []
-    backups = []
-    for backup in sorted(root.iterdir(), reverse=True):
-        record = backup / "manifest.json"
-        if not record.is_file():
-            continue
-        try:
-            manifest = json.loads(record.read_text())
-        except ValueError:
-            continue
-        backups.append({"name": backup.name, "path": str(backup),
-                        "files": {str(path): stamp for path, stamp in manifest.get("files", {}).items()},
-                        "installed": len(manifest.get("installed", []))})
-    return backups
-
-
-def verify_backup(backup, progress=None):
-    root = Path(backup)
-    record = root / "manifest.json"
-    manifest = json.loads(record.read_text())
-    files = manifest.get("files", {})
-    checked = 0
-    for relative, stamp in sorted(files.items()):
-        if digest(root / relative) != stamp:
-            return False
-        checked += 1
-        if progress:
-            progress("Verify backup", checked, len(files))
-    return True
-
-
-def restore_backup(world, backup, progress=None):
-    root = Path(world)
-    source = Path(backup)
-    manifest = json.loads((source / "manifest.json").read_text())
-    files = manifest.get("files", {})
-    if not files:
-        raise ValueError("Backup manifest lists no files")
-    if not verify_backup(source, progress):
-        raise ValueError("Backup files no longer match their manifest hashes")
-    safety = root / ".structura" / "backups" / (
-        datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-restore-") + uuid4().hex[:8])
-    safety.mkdir(parents=True)
-    restored = 0
-    try:
-        stamps = {}
-        for relative in sorted(files):
-            target = root / relative
-            if target.exists():
-                before = safety / relative
-                before.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(target, before)
-                stamps[relative] = digest(target)
-        (safety / "manifest.json").write_text(json.dumps({"files": {str(k): v for k, v in stamps.items()},
-                                                          "installed": []}, indent=2))
-        for relative, stamp in sorted(files.items()):
-            target = root / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source / relative, target)
-            if digest(target) != stamp:
-                raise OSError(f"Restored file failed verification: {relative}")
-            restored += 1
-            if progress:
-                progress("Restore backup", restored, len(files))
-    except Exception as error:
-        raise OSError(f"Restore interrupted; current files were saved to {safety}. {error}") from error
-    return {"restored": restored, "safety": str(safety)}
+        return install_staged(self.world, self.temporary, self.originals, self.changed)

@@ -18,6 +18,7 @@ from amulet_nbt import (
 
 from .nbt_io import PathInput, write_root
 from .structure import Structure, state_key
+from .validation import vector
 
 
 def _encode_varints(values):
@@ -31,7 +32,7 @@ def _encode_varints(values):
     return bytes(data)
 
 
-def schematic_root(src):
+def schematic_root(src, *, offset=(0, 0, 0)):
     """Build a v2 payload using the selected palette; omitted cells become air.
 
     Sponge has one palette and a dense block array. Other Structure palettes
@@ -83,7 +84,7 @@ def schematic_root(src):
         "Width": ShortTag(sx if sx < 32768 else sx - 65536),
         "Height": ShortTag(sy if sy < 32768 else sy - 65536),
         "Length": ShortTag(sz if sz < 32768 else sz - 65536),
-        "Offset": IntArrayTag([0, 0, 0]),
+        "Offset": IntArrayTag(vector(offset, "Schematic offset")),
         "Palette": CompoundTag({key: IntTag(i) for key, i in dedup_index.items()}),
         "PaletteMax": IntTag(len(dedup_index)),
         "BlockData": ByteArrayTag(np.frombuffer(block_data, dtype=np.int8)),
@@ -92,10 +93,10 @@ def schematic_root(src):
     })
 
 
-def export_schematic(src: Structure, destination: PathInput) -> Path:
+def export_schematic(src: Structure, destination: PathInput, *, offset=(0, 0, 0)) -> Path:
     """Write a Sponge v2 file without requiring the legacy conversion extra."""
     destination = Path(destination)
-    write_root(schematic_root(src), destination, name="Schematic")
+    write_root(schematic_root(src, offset=offset), destination, name="Schematic")
     return destination
 
 

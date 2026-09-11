@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from math import floor
 from typing import Optional
+from uuid import UUID
 
 from amulet_nbt import CompoundTag, DoubleTag, IntTag, ListTag, StringTag
 
@@ -28,10 +29,33 @@ def player_entities(path, data, *, located=False):
         payload = {**local_player, "id": StringTag("minecraft:player")}
         location = EntityLocation(dimension_id(payload.get("Dimension", "minecraft:overworld")), "player", file="level.dat")
         yield (payload, location) if located else payload
-    for file in sorted((path / "playerdata").glob("*.dat")):
+    for file in sorted([*(path / "players" / "data").glob("*.dat"), *(path / "playerdata").glob("*.dat")]):
         payload = {**load_root(file), "id": StringTag("minecraft:player")}
         location = EntityLocation(dimension_id(payload.get("Dimension", "minecraft:overworld")), "player", file=str(file.relative_to(path)))
         yield (payload, location) if located else payload
+
+
+def singleplayer(path, data):
+    if "Player" in data:
+        return data["Player"]
+    reference = data.get("singleplayer_uuid")
+    if reference is None:
+        return {}
+    try:
+        if isinstance(reference, StringTag):
+            identity = UUID(str(reference))
+        else:
+            parts = tuple(int(part) for part in reference)
+            if len(parts) != 4:
+                return {}
+            identity = UUID(int=sum((part & 0xffffffff) << (96 - index * 32) for index, part in enumerate(parts)))
+    except (ValueError, TypeError):
+        return {}
+    for directory in (path / "players" / "data", path / "playerdata"):
+        file = directory / f"{identity}.dat"
+        if file.is_file():
+            return load_root(file)
+    return {}
 
 
 def local_entities(payloads, dimension, origin, size, *, located=False):

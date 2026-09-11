@@ -7,12 +7,13 @@ from typing import Optional
 from amulet_nbt import CompoundTag, IntTag, ListTag
 
 from .blockstates import parse_state
+from .block_array import BlockArray
 from .limits import DEFAULT_MAX_BLOCKS, check_volume
 from .nbt_io import load_root
 from .structure import Structure
 from .validation import vector
 from .world_chunks import append_chunk
-from .world_entities import EntityLocation, dimension_id, local_entities, player_entities
+from .world_entities import EntityLocation, dimension_id, local_entities, player_entities, singleplayer
 from .world_io import read_chunk as read_chunk
 
 
@@ -49,7 +50,7 @@ class JavaWorld:
                 relative = region.parent.relative_to(custom)
                 if region.is_dir() and len(relative.parts) >= 2:
                     self.dimensions[relative.parts[0] + ":" + "/".join(relative.parts[1:])] = region.parent
-        player = self.data.get("Player", {})
+        player = singleplayer(self.path, self.data)
         self.start_dimension = dimension_id(player.get("Dimension", "minecraft:overworld"))
         self.start_dimension = self.start_dimension if self.start_dimension in self.dimensions else "minecraft:overworld"
         position = player.get("Pos")
@@ -82,6 +83,7 @@ class JavaWorld:
             "palette": ListTag([parse_state("minecraft:air")]), "blocks": ListTag(), "entities": ListTag(),
         }))
         source.source_origin = origin
+        source.present = BlockArray.empty(size)
         palette = {"minecraft:air": 0}
         loaded, missing, entities, sections = set(), set(), [], set()
         directory = self.dimensions[dimension]

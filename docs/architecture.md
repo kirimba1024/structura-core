@@ -13,6 +13,7 @@ only by the corresponding conversion paths.
 | `blockstates` | State syntax, canonical keys, palette validation and property-preserving material replacement. |
 | `validation` | Checked 32-bit integers, finite coordinate vectors and NBT container types. No document or I/O dependency. |
 | `structure` | `Structure`, palette variants, block records and document invariants. |
+| `block_array` | MutableMapping-compatible int32 block storage with numerical validation, counts and region copies; -1 denotes an absent record. |
 | `structure_writer` | Build an owned output document: reconcile palettes, apply additions/replacements, shift records and preserve metadata. |
 | `entity_positions` | Copy and place block-entity coordinates; shift entity positions and hanging anchors without changing unrelated payload fields. |
 | `nbt` | Re-export the established import paths for callers. |
@@ -56,6 +57,7 @@ Requesting `prepare_for_placement=True` points callers to
 | `world` | World metadata, dimensions, region selection and read orchestration. |
 | `world_io` | Read Anvil chunk locations and internal/external chunk payloads. |
 | `world_chunks` | Decode section states, merge palettes and localize block entities. No file I/O. |
+| `world_terrain` | Inventory actual Anvil chunk locations and stream decoded sections for an immutable terrain snapshot. No render or GUI dependency. |
 | `world_entities` | Player discovery, entity filtering/deduplication, local records and storage locations. |
 | `world_entity_write` | Compare and stage entity/player changes, preserving unknown NBT and original storage. |
 | `world_write`, `world_staging` | Explicit block/entity save orchestration, staged regions/files, conflict checks and backups. |
@@ -75,3 +77,9 @@ legacy layout and conversion failures. World tests cover modern/older section
 layouts, negative coordinates, external chunks, entities and malformed input.
 Public API type checks run against a built wheel in CI. Geometry tests and the
 analysis benchmark live in structura-geo.
+
+## Преобразования и запись мира: 11 сентября
+
+`grid_transform.py` представляет 48 подписанных перестановок осей: композиция, обратная матрица, координаты ячеек и непрерывные позиции. `block_transform.py` применяет их к свойствам с учётом допустимых значений; непредставимая ориентация отклоняется. `entity_grid_transform.py` сохраняет неизвестный NBT и преобразует позиции, движение, направление взгляда и hanging anchors. GUI-зависимостей нет. Точные циклы clipboard организует edit, сохраняя оригинал.
+
+`StagedWorld` переиспользует AnvilRegionInterface в пределах одной записи. Чанки читаются свежими, патч сохраняет незатронутые данные; тест параллельного внешнего изменения проверяет это. NumPy-массивы координат при чтении преобразуются пакетно. Полная проверка инвариантов Structure сохраняется, обычные целочисленные tuple-позиции имеют быстрый путь.

@@ -6,6 +6,7 @@ from amulet_nbt import ByteTag, IntTag, ListTag, LongArrayTag, from_snbt
 
 from .blockstates import AIR_NAMES, parse_state, state_key
 from .world_chunks import _section_states
+from .compatibility import world_write_reason
 
 
 def normalized_cell(state, payload):
@@ -23,8 +24,9 @@ def patch_chunk(root, cx, cz, changes, force=False):
 
     canonical = lru_cache(maxsize=4096)(lambda state: state_key(parse_state(state)))
     version = int(root.get("DataVersion", 0))
-    if version < 2844:
-        raise ValueError("World writing requires Java 1.18 or newer")
+    reason = world_write_reason(version)
+    if reason:
+        raise ValueError(reason)
     if (int(root["xPos"]), int(root["zPos"])) != (cx, cz):
         raise ValueError("Chunk coordinates do not match the region index")
     sections = {int(section["Y"]): section for section in root.get("sections", ())}
