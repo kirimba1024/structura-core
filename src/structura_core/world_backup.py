@@ -187,7 +187,7 @@ def install_staged(world, temporary, originals, changed, *, kind="save", progres
                 target = checked_path(backup, relative)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(checked_path(temporary / "before", relative), target)
-                with target.open("r+b") as stream:
+                with target.open("r+b" if os.name == "nt" else "rb") as stream:
                     os.fsync(stream.fileno())
                 if digest(target) != stamp:
                     raise OSError(f"Backup verification failed: {relative}")

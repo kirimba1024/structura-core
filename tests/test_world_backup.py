@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path, PureWindowsPath
 
 import pytest
@@ -46,6 +47,8 @@ def test_nested_manifest_paths_are_portable_and_restore_on_either_platform(tmp_p
         path = temporary / name / relative.as_posix()
         path.parent.mkdir(parents=True)
         path.write_bytes(data)
+        if name == "before" and os.name == "posix":
+            path.chmod(0o444)
     backup = install_staged(world, temporary, {relative: digest(original)}, {relative})
     manifest = read_manifest(backup)
     assert list(manifest["files"]) == ["region/r.0.0.mca"]
