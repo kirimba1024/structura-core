@@ -31,7 +31,7 @@ def player_entities(path, data, *, located=False):
         yield (payload, location) if located else payload
     for file in sorted([*(path / "players" / "data").glob("*.dat"), *(path / "playerdata").glob("*.dat")]):
         payload = {**load_root(file), "id": StringTag("minecraft:player")}
-        location = EntityLocation(dimension_id(payload.get("Dimension", "minecraft:overworld")), "player", file=str(file.relative_to(path)))
+        location = EntityLocation(dimension_id(payload.get("Dimension", "minecraft:overworld")), "player", file=file.relative_to(path).as_posix())
         yield (payload, location) if located else payload
 
 

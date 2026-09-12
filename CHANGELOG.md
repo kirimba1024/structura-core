@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.2
+
+- Add compact block arrays and shared block/entity grid transforms for editing.
+- Add bounded Java world changes, conflict detection, backups and verified restore,
+  preserving block entities, world entities and unknown chunk data.
+- Support full saved vertical columns with an explicit cell budget, independent
+  of camera height, including legacy palette sections and missing-chunk tracking.
+- Supply the world and transform APIs required by Structura Edit 0.1.0a2.
+- Include the locking dependency needed for standalone backup restore; keep
+  Amulet optional. Use portable manifest/player paths and writable file handles
+  for backup synchronization on Windows.
+
 ## 0.6.1
 
 - Move geometry, metrics, morphology and placement preparation to structura-geo.

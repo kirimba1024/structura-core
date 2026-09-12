@@ -168,7 +168,7 @@ def install_staged(world, temporary, originals, changed, *, kind="save", progres
         return None
     if kind == "save":
         require_complete_save(world)
-    files = {str(path): originals[path] for path in sorted(changed)}
+    files = {path.as_posix(): originals[path] for path in sorted(changed)}
     after = {relative: digest(checked_path(temporary / "after", relative)) for relative in files}
     for relative, stamp in files.items():
         if digest(checked_path(world, relative)) != stamp or digest(checked_path(temporary / "before", relative)) != stamp:
@@ -187,7 +187,7 @@ def install_staged(world, temporary, originals, changed, *, kind="save", progres
                 target = checked_path(backup, relative)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(checked_path(temporary / "before", relative), target)
-                with target.open("rb") as stream:
+                with target.open("r+b") as stream:
                     os.fsync(stream.fileno())
                 if digest(target) != stamp:
                     raise OSError(f"Backup verification failed: {relative}")

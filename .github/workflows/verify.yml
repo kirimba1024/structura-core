@@ -67,7 +67,7 @@ jobs:
           python - <<'PYTHON'
           import pathlib, subprocess, sys
           wheel = next(pathlib.Path("dist").glob("*.whl"))
-          subprocess.check_call([sys.executable, "-m", "pip", "install", f"{wheel}[legacy]"])
+          subprocess.check_call([sys.executable, "-m", "pip", "install", f"{wheel}[world,legacy,bedrock]"])
           PYTHON
       - name: Check installed package location
         shell: bash

@@ -10,9 +10,6 @@ from structura_core.world_entity_write import EntityPatch
 from structura_core.world_write import save_world_patch
 from test_world import region_file
 
-pytest_plugins = ("test_world_write",)
-
-
 DIMENSION = "minecraft:overworld"
 
 

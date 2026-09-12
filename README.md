@@ -32,8 +32,9 @@ translation needs `[bedrock]` and can be lossy. Sponge v1 without a DataVersion
 requires `--source-data-version` when converting to another format; supply the
 source game's version, not the desired target.
 
-The base package uses `amulet-nbt` for NBT parsing. The separate `amulet-core`
-translation dependency is installed only by `[legacy]` or `[bedrock]`.
+The base package uses `amulet-nbt` for NBT parsing, NumPy for block data and
+`portalocker` for verified backup restore. The separate `amulet-core` translation
+dependency is installed only by `[world]`, `[legacy]` or `[bedrock]`.
 
 ## Python
 

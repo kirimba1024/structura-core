@@ -91,6 +91,26 @@ def test_world_refresh_reads_new_data_and_missing_is_explicit(world):
     assert not world.read_region(radius=0, vertical_radius=16, include_entities=False).structure.entities
 
 
+def test_full_columns_include_saved_top_and_bottom_independent_of_camera_height(world):
+    from copy import deepcopy
+
+    root = read_chunk(world.path / "region", -1, -1)
+    body = root.get("Level", root)
+    sections = body.get("sections", body.get("Sections"))
+    for height in (-4, 19):
+        section = deepcopy(sections[0])
+        section["Y"] = ByteTag(height)
+        sections.append(section)
+    region_file(world.path / "region", -1, -1, root)
+    for camera_y in (-200, 500):
+        source = world.read_region((-1, camera_y, -1), radius=0, vertical_radius=None).structure
+        assert source.source_origin == (-16, -64, -16)
+        assert source.size == (16, 384, 16)
+        assert {position for position in source.present} == {(15, 15, 15), (15, 63, 15), (15, 383, 15)}
+    with pytest.raises(ValueError, match="volume"):
+        world.read_region(radius=0, vertical_radius=None, max_cells=32_768)
+
+
 def test_world_rejects_invalid_ranges_and_truncated_chunks(world):
     with pytest.raises(ValueError, match="Radius"):
         world.read_region(radius=True)

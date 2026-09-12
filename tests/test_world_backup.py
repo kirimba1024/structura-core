@@ -1,5 +1,5 @@
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -31,6 +31,28 @@ def test_restore_reverses_created_and_deleted_files(tmp_path):
     restore_backup(world, result["safety"])
     assert (world / "created.dat").read_text() == "new"
     assert not (world / "deleted.dat").exists()
+
+
+def test_nested_manifest_paths_are_portable_and_restore_on_either_platform(tmp_path):
+    from structura_core.world_backup import digest, install_staged, read_manifest
+
+    world = tmp_path / "world"
+    relative = PureWindowsPath("region") / "r.0.0.mca"
+    original = world / relative.as_posix()
+    original.parent.mkdir(parents=True)
+    original.write_bytes(b"original")
+    temporary = tmp_path / "stage"
+    for name, data in (("before", b"original"), ("after", b"changed")):
+        path = temporary / name / relative.as_posix()
+        path.parent.mkdir(parents=True)
+        path.write_bytes(data)
+    backup = install_staged(world, temporary, {relative: digest(original)}, {relative})
+    manifest = read_manifest(backup)
+    assert list(manifest["files"]) == ["region/r.0.0.mca"]
+    assert manifest["installed"] == ["region/r.0.0.mca"]
+    assert original.read_bytes() == b"changed"
+    restore_backup(world, backup)
+    assert original.read_bytes() == b"original"
 
 
 @pytest.mark.parametrize("fail_after_replace", [False, True])

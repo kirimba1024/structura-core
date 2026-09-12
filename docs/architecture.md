@@ -63,6 +63,9 @@ Requesting `prepare_for_placement=True` points callers to
 | `world_write`, `world_staging` | Explicit block/entity save orchestration, staged regions/files, conflict checks and backups. |
 
 `world.read_chunk`, `JavaWorld` and `WorldRegion` retain their import paths.
+`JavaWorld.read_region(vertical_radius=None)` reads the full height of actual saved
+sections in the requested columns. Explicit finite radii remain supported; missing
+sections are not generated. The editor defaults to this full-height mode.
 Amulet remains optional and is loaded at the world-reading boundary. The decoder
 is passed explicitly into section processing. Selection parameters are validated
 before reading chunks. Duplicate sections and block entities are rejected rather
@@ -77,6 +80,11 @@ legacy layout and conversion failures. World tests cover modern/older section
 layouts, negative coordinates, external chunks, entities and malformed input.
 Public API type checks run against a built wheel in CI. Geometry tests and the
 analysis benchmark live in structura-geo.
+
+Verified backup restore works in the base install and declares its `portalocker`
+dependency there. Manifest and player-storage paths use forward slashes on every
+platform. Backup files are opened for writing before fsync, as required on Windows;
+directory synchronization remains specific to POSIX.
 
 ## Преобразования и запись мира: 11 сентября
 

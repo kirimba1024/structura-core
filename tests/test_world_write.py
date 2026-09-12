@@ -1,27 +1,11 @@
 from copy import deepcopy
 
 import pytest
-from amulet_nbt import IntTag, StringTag, from_snbt
+from amulet_nbt import IntTag, StringTag
 
-from structura_core.nbt import write_root
-from structura_core.world import JavaWorld, read_chunk
+from structura_core.world import read_chunk
 from structura_core.world_write import save_world_patch
 from test_world import region_file
-
-
-@pytest.fixture
-def editable_world(tmp_path):
-    pytest.importorskip("amulet")
-    write_root(from_snbt('{Data:{DataVersion:3955,LevelName:"Edit test"}}'), tmp_path / "level.dat")
-    chunk = from_snbt('''{DataVersion:3955,xPos:0,zPos:0,Status:"minecraft:full",custom:{keep:42},
-        sections:[{Y:0b,block_states:{palette:[{Name:"minecraft:stone"}]},
-                   biomes:{palette:["minecraft:plains"]},BlockLight:[B;1b,2b,3b]}],
-        Heightmaps:{custom:[L;1L,2L]},isLightOn:1b,
-        block_entities:[{id:"minecraft:chest",x:1,y:1,z:1,Items:[{Slot:0b,id:"minecraft:diamond",count:3}]}],
-        block_ticks:[{x:0,y:0,z:0,i:"minecraft:stone",t:4},{x:2,y:0,z:0,i:"minecraft:stone",t:4}]}''')
-    region_file(tmp_path / "region", 0, 0, chunk)
-    region_file(tmp_path / "poi", 0, 0, from_snbt('{Sections:{"0":{Valid:1b,Records:[]},"1":{Valid:1b,Records:[]}}}'))
-    return JavaWorld(tmp_path)
 
 
 def patch(position=(0, 0, 0), state="minecraft:gold_block"):
