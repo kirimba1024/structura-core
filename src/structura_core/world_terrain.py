@@ -18,9 +18,14 @@ class TerrainSection:
     block_entities: tuple = ()
 
 
-def existing_chunks(directory):
+def existing_chunks(directory, *, regions=None):
     chunks = []
-    for path in sorted(Path(directory).glob("r.*.*.mca")):
+    directory = Path(directory)
+    paths = directory.glob("r.*.*.mca") if regions is None else (
+        directory / f"r.{int32(x, 'region x')}.{int32(z, 'region z')}.mca" for x, z in set(regions))
+    for path in sorted(paths):
+        if not path.is_file():
+            continue
         match = re.fullmatch(r"r\.(-?\d+)\.(-?\d+)\.mca", path.name)
         if match is None:
             continue
