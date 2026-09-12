@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "structura-core"
-version = "0.6.2"
+version = "0.6.3"
 description = "Validated Minecraft structure data and NBT/SNBT, Litematic, Sponge and Bedrock conversion"
 readme = "README.md"
 requires-python = ">=3.9"

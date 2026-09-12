@@ -13,7 +13,7 @@ __all__ = [
     "parse_state", "save_structure", "state_key", "convert_structure", "ConversionWarning",
     "Mcstructure", "export_mcstructure",
 ]
-__version__ = "0.6.2"
+__version__ = "0.6.3"
 
 
 def __getattr__(name):

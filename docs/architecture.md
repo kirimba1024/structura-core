@@ -63,6 +63,8 @@ Requesting `prepare_for_placement=True` points callers to
 | `world_write`, `world_staging` | Explicit block/entity save orchestration, staged regions/files, conflict checks and backups. |
 
 `world.read_chunk`, `JavaWorld` and `WorldRegion` retain their import paths.
+`world_terrain.existing_chunks(regions=...)` limits inventory to requested region
+coordinates, reading only their headers. Omit the filter to inventory a whole dimension.
 `JavaWorld.read_region(vertical_radius=None)` reads the full height of actual saved
 sections in the requested columns. Explicit finite radii remain supported; missing
 sections are not generated. The editor defaults to this full-height mode.
