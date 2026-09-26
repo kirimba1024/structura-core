@@ -19,7 +19,10 @@ class TerrainSection:
 
 
 def existing_chunks(directory, *, regions=None):
-    chunks = []
+    return tuple(sorted(iter_chunks(directory, regions=regions)))
+
+
+def iter_chunks(directory, *, regions=None):
     directory = Path(directory)
     paths = directory.glob("r.*.*.mca") if regions is None else (
         directory / f"r.{int32(x, 'region x')}.{int32(z, 'region z')}.mca" for x, z in set(regions))
@@ -39,8 +42,7 @@ def existing_chunks(directory, *, regions=None):
         values = locations[occupied]
         if np.any((values >> 8 < 2) | ((values & 255) == 0)):
             raise ValueError(f"Invalid chunk location in {path.name}")
-        chunks.extend((rx * 32 + index % 32, rz * 32 + index // 32) for index in occupied.tolist())
-    return tuple(sorted(chunks))
+        yield from ((rx * 32 + index % 32, rz * 32 + index // 32) for index in occupied.tolist())
 
 
 def terrain_sections(directory, cx, cz, data_version, *, reader=None):

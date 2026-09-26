@@ -75,6 +75,9 @@ Requesting `prepare_for_placement=True` points callers to
 | `world_write`, `world_staging` | Explicit block/entity save orchestration, staged regions/files, conflict checks and backups. |
 
 `world.read_chunk`, `JavaWorld` and `WorldRegion` retain their import paths.
+`world_terrain.iter_chunks` reads one region header at a time and yields occupied
+chunk coordinates; callers own sorting and storage. `existing_chunks` retains
+its sorted tuple API using the same header validation.
 `read_world_box` decodes an absolute box into sparse SectionArray pages through an
 injected chunk reader and optional known-column inventory. It retains air variants,
 block NBT and existing-section coverage without materializing the empty bounding box.

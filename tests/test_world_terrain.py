@@ -40,3 +40,15 @@ def test_index_rejects_invalid_locations_anywhere_in_the_header(tmp_path, locati
     path.write_bytes(data)
     with pytest.raises(ValueError, match='Invalid chunk location'):
         existing_chunks(tmp_path)
+
+
+def test_chunk_iterator_reads_one_region_at_a_time(tmp_path):
+    from structura_core.world_terrain import iter_chunks
+
+    header(tmp_path / 'r.0.0.mca', (0, 33))
+    (tmp_path / 'r.1.0.mca').write_bytes(b'bad later region')
+    chunks = iter_chunks(tmp_path)
+    assert next(chunks) == (0, 0)
+    assert next(chunks) == (1, 1)
+    with pytest.raises(ValueError, match='Truncated region header'):
+        next(chunks)
