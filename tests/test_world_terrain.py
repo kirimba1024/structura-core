@@ -3,6 +3,7 @@ import struct
 import pytest
 
 from structura_core.world_terrain import existing_chunks
+from structura_core.world_io import read_chunk
 
 
 def header(path, indices):
@@ -52,3 +53,25 @@ def test_chunk_iterator_reads_one_region_at_a_time(tmp_path):
     assert next(chunks) == (1, 1)
     with pytest.raises(ValueError, match='Truncated region header'):
         next(chunks)
+
+
+@pytest.mark.parametrize('size', [0, 8192])
+def test_empty_regions_have_no_committed_chunks_and_are_not_modified(tmp_path, size):
+    path = tmp_path / 'r.-2.3.mca'
+    body = bytes(size)
+    path.write_bytes(body)
+    stamp = path.stat().st_mtime_ns
+    assert existing_chunks(tmp_path) == ()
+    for cx, cz in ((-64, 96), (-48, 111), (-33, 127)):
+        assert read_chunk(tmp_path, cx, cz) is None
+    assert path.read_bytes() == body and path.stat().st_mtime_ns == stamp
+
+
+@pytest.mark.parametrize('size', [1, 4, 4096, 8191])
+def test_nonempty_partial_headers_are_rejected_even_at_empty_slots(tmp_path, size):
+    (tmp_path / 'r.0.0.mca').write_bytes(bytes(size))
+    with pytest.raises(ValueError, match='Truncated region header'):
+        existing_chunks(tmp_path)
+    for cx, cz in ((0, 0), (31, 31)):
+        with pytest.raises(ValueError, match='Truncated region header'):
+            read_chunk(tmp_path, cx, cz)

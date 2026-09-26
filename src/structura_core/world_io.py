@@ -1,4 +1,5 @@
 import struct
+from os import fstat
 from pathlib import Path
 
 
@@ -9,6 +10,11 @@ def read_chunk(directory, cx, cz):
     if not path.is_file():
         return None
     with path.open("rb") as stream:
+        file_size = fstat(stream.fileno()).st_size
+        if not file_size:
+            return None
+        if file_size < 8192:
+            raise ValueError(f"Truncated region header: {path.name}")
         header = 4 * ((cx % 32) + 32 * (cz % 32))
         stream.seek(header)
         value = stream.read(4)

@@ -35,6 +35,8 @@ def iter_chunks(directory, *, regions=None):
         rx, rz = map(int, match.groups())
         with path.open("rb") as stream:
             header = stream.read(8192)
+        if not header:
+            continue
         if len(header) != 8192:
             raise ValueError(f"Truncated region header: {path.name}")
         locations = np.frombuffer(header, dtype=">u4", count=1024)
