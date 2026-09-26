@@ -14,6 +14,7 @@ only by the corresponding conversion paths.
 | `validation` | Checked 32-bit integers, finite coordinate vectors and NBT container types. No document or I/O dependency. |
 | `structure` | `Structure`, palette variants, block records and document invariants. |
 | `block_array` | MutableMapping-compatible int32 block storage with numerical validation, counts and region copies; -1 denotes an absent record. |
+| `section_page`, `section_array` | Exact immutable 16³ numeric pages and a copy-on-write mapping with local reads. The optional backing source supplies immutable pages; persistence belongs to its caller. |
 | `structure_writer` | Build an owned output document: reconcile palettes, apply additions/replacements, shift records and preserve metadata. |
 | `entity_positions` | Copy and place block-entity coordinates; shift entity positions and hanging anchors without changing unrelated payload fields. |
 | `nbt` | Re-export the established import paths for callers. |
@@ -27,6 +28,17 @@ import the implementation that owns an operation, keeping this direction intact.
 Format readers use `blockstates` and `validation` directly; they do not obtain
 general validators through another document reader. Existing state helpers
 remain importable from `structura_core`, `nbt` and `structure`.
+
+`SectionArray` preserves the block mapping contract without allocating its entire
+bounding box. Pages choose the smallest empty, uniform, sparse, paletted or dense
+encoding; palette values remain exact integer indices. Absence is -1; explicit air
+is an ordinary palette entry. Unknown world coverage remains a separate world-layer
+contract. Copies share the `immutables.Map` section index and immutable page bytes.
+Edits accumulate within touched pages and seal on read/copy. Validation and material
+counts reuse the immutable index identity; changing bounds or palettes revalidates.
+Construction rejects invalid palette indices before numeric conversion and checks
+the requested size against existing dense or section storage.
+Neither this storage nor its versioned page codec imports SQLite, edit or GUI code.
 
 The writer creates copies of palettes and records. It validates changes before
 writing the destination, preserves authored air and unknown metadata, and keeps
@@ -63,6 +75,11 @@ Requesting `prepare_for_placement=True` points callers to
 | `world_write`, `world_staging` | Explicit block/entity save orchestration, staged regions/files, conflict checks and backups. |
 
 `world.read_chunk`, `JavaWorld` and `WorldRegion` retain their import paths.
+`read_world_box` decodes an absolute box into sparse SectionArray pages through an
+injected chunk reader and optional known-column inventory. It retains air variants,
+block NBT and existing-section coverage without materializing the empty bounding box.
+`chunk_cells` checks requested world positions and decodes only their sections.
+`SectionArray.set_region` validates the full numerical input before updating pages.
 `world_terrain.existing_chunks(regions=...)` limits inventory to requested region
 coordinates, reading only their headers. Omit the filter to inventory a whole dimension.
 `JavaWorld.read_region(vertical_radius=None)` reads the full height of actual saved

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.6
+
+- Read sparse world boxes through an injected chunk reader; preserve exact air variants and block data.
+- Validate direct chunk-cell reads and atomic numerical section updates.
+
+## 0.6.5
+
+- Expose section addresses without decoding or enumerating individual blocks.
+
+## 0.6.4
+
+- Add exact immutable 16³ block sections, bounded local region reads and shared
+  copy-on-write indexes using the pinned `immutables` dependency.
+- Preserve the block mapping, absence, palettes and numerical validation contracts.
+- Expose native Sponge bytes without dropping the outer v3 container, allowing
+  editor checkpoints to retain unknown fields.
+
 ## 0.6.2
 
 - Add compact block arrays and shared block/entity grid transforms for editing.

@@ -11,6 +11,7 @@ from .block_array import BlockArray
 from .limits import DEFAULT_MAX_BLOCKS, check_volume
 from .nbt_io import load_root
 from .structure import Structure
+from .section_array import SectionArray
 from .validation import int32, vector
 from .world_chunks import append_chunk
 from .world_entities import EntityLocation, dimension_id, local_entities, player_entities, singleplayer
@@ -32,6 +33,41 @@ class WorldRegion:
 
     def contains_column(self, x, z):
         return (x // 16, z // 16) in self.loaded
+
+
+def read_world_box(directory, lower, upper, data_version, *, dimension='minecraft:overworld',
+                   reader=read_chunk, columns=None, max_blocks=DEFAULT_MAX_BLOCKS):
+    from amulet.utils.world_utils import decode_long_array
+
+    lower, upper = vector(lower, 'lower bounds'), vector(upper, 'upper bounds')
+    check_volume(0, max_blocks)
+    if any(hi <= lo for lo, hi in zip(lower, upper)):
+        raise ValueError('Keep at least 1 block per axis')
+    origin = tuple(p // 16 * 16 for p in lower)
+    stop = tuple((p + 15) // 16 * 16 for p in upper)
+    size = vector((hi - lo for lo, hi in zip(origin, stop)), 'region size')
+    source = Structure.from_root(CompoundTag({
+        'DataVersion': IntTag(data_version), 'size': ListTag([IntTag(p) for p in size]),
+        'palette': ListTag([parse_state('minecraft:air')]), 'blocks': ListTag(), 'entities': ListTag(),
+    }))
+    source.source_origin = origin
+    source.present = SectionArray(size)
+    if columns is None:
+        columns = product(range(origin[0] // 16, stop[0] // 16), range(origin[2] // 16, stop[2] // 16))
+    palette, loaded, sections = {'minecraft:air': 0}, set(), set()
+    for x, z in columns:
+        if not (origin[0] <= x * 16 < stop[0] and origin[2] <= z * 16 < stop[2]):
+            continue
+        root = reader(directory, x, z)
+        if root is None:
+            continue
+        body = append_chunk(source, root, x, z, palette, max_blocks, decode_long_array, exact_air=True)
+        loaded.add((x, z))
+        sections.update((x, int(section['Y']), z) for section in body.get('sections', body.get('Sections', ()))
+                        if 'block_states' in section or 'Palette' in section)
+    source.validate()
+    center = tuple((lo + hi) / 2 for lo, hi in zip(lower, upper))
+    return WorldRegion(source, frozenset(loaded), frozenset(), (), dimension, center, 0, None, frozenset(sections))
 
 
 class JavaWorld:
@@ -58,7 +94,7 @@ class JavaWorld:
             float(self.data.get("Spawn" + axis, 64 if axis == "Y" else 0)) for axis in "XYZ")
 
     def read_region(self, center=None, *, dimension="minecraft:overworld", radius=1, vertical_radius=48,
-                    max_blocks=DEFAULT_MAX_BLOCKS, include_entities=True, max_cells=8_000_000):
+                    max_blocks=DEFAULT_MAX_BLOCKS, include_entities=True, max_cells=8_000_000, chunk_reader=None):
         center = vector(self.start if center is None else center, "Center", integer=False)
         if isinstance(radius, bool) or not isinstance(radius, int) or not 0 <= radius <= 8:
             raise ValueError("Radius must be between 0 and 8 chunks")
@@ -71,10 +107,11 @@ class JavaWorld:
             raise ValueError(f"Unknown dimension: {dimension}")
         cx, cz = floor(center[0] / 16), floor(center[2] / 16)
         directory = self.dimensions[dimension]
+        terrain_reader = chunk_reader or read_chunk
         columns = tuple(product(range(cx - radius, cx + radius + 1), range(cz - radius, cz + radius + 1)))
         roots = {}
         if vertical_radius is None:
-            roots = {(x, z): read_chunk(directory / "region", x, z) for x, z in columns}
+            roots = {(x, z): terrain_reader(directory / "region", x, z) for x, z in columns}
             heights = [int32(section["Y"], "section Y") for root in roots.values() if root is not None
                        for body in (root.get("Level", root),)
                        for section in body.get("sections", body.get("Sections", ()))
@@ -102,7 +139,7 @@ class JavaWorld:
         palette = {"minecraft:air": 0}
         loaded, missing, entities, sections = set(), set(), [], set()
         for x, z in columns:
-            root = roots.pop((x, z)) if vertical_radius is None else read_chunk(directory / "region", x, z)
+            root = roots.pop((x, z)) if vertical_radius is None else terrain_reader(directory / "region", x, z)
             if root is None:
                 missing.add((x, z))
                 continue

@@ -42,10 +42,10 @@ def existing_chunks(directory, *, regions=None):
     return tuple(sorted(chunks))
 
 
-def terrain_sections(directory, cx, cz, data_version):
+def terrain_sections(directory, cx, cz, data_version, *, reader=None):
     from amulet.utils.world_utils import decode_long_array
 
-    root = read_chunk(directory, cx, cz)
+    root = (reader or read_chunk)(directory, cx, cz)
     if root is None:
         raise ValueError("World changed during reading; refresh the overview")
     version = int32(root.get("DataVersion", data_version), "chunk DataVersion")

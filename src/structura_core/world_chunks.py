@@ -6,6 +6,7 @@ from amulet_nbt import IntTag
 from .blockstates import AIR_NAMES, state_key, validate_palette
 from .validation import compound_list, int32, vector
 from .block_array import BlockArray
+from .section_array import SectionArray
 
 
 def _section_states(section, version, decode_states):
@@ -29,7 +30,44 @@ def _section_states(section, version, decode_states):
     return entries, indices
 
 
-def append_chunk(source, root, cx, cz, palette, max_blocks, decode_states):
+def chunk_cells(root, positions):
+    from amulet.utils.world_utils import decode_long_array
+
+    body = root.get('Level', root)
+    version = int32(root.get('DataVersion', 0), 'chunk DataVersion')
+    if version < 1451:
+        raise ValueError('World viewing currently requires Java 1.13 or newer')
+    column = int32(body['xPos'], 'chunk xPos'), int32(body['zPos'], 'chunk zPos')
+    sections, payloads = {}, {}
+    for section in body.get('sections', body.get('Sections', ())):
+        y = int32(section['Y'], 'section Y')
+        if y in sections:
+            raise ValueError('Duplicate section Y in chunk')
+        sections[y] = section
+    for payload in body.get('block_entities', body.get('TileEntities', ())):
+        position = vector((payload[axis] for axis in 'xyz'), 'block entity position')
+        if position in payloads:
+            raise ValueError(f'Duplicate block entity at {position}')
+        payloads[position] = payload
+    decoded = {}
+    for position in positions:
+        x, y, z = vector(position, 'block position')
+        if (x // 16, z // 16) != column:
+            raise ValueError('Chunk coordinates do not match the requested block')
+        cy = y // 16
+        if cy not in decoded:
+            section = sections.get(cy)
+            value = _section_states(section, version, decode_long_array) if section is not None else None
+            if value is None:
+                raise ValueError(f'Destination section is absent at {x // 16}, {cy}, {z // 16}')
+            palette, indices = value
+            decoded[cy] = tuple(state_key(entry) for entry in palette), indices
+        palette, indices = decoded[cy]
+        index = x % 16 + 16 * (z % 16) + 256 * (y % 16)
+        yield position, palette[int(indices[index])], payloads.get(position)
+
+
+def append_chunk(source, root, cx, cz, palette, max_blocks, decode_states, *, exact_air=False):
     version = int32(root.get("DataVersion", source.data_version), "chunk DataVersion")
     if version < 1451:
         raise ValueError("World viewing currently requires Java 1.13 or newer")
@@ -57,11 +95,12 @@ def append_chunk(source, root, cx, cz, palette, max_blocks, decode_states):
                 palette[state] = len(source.palette_raw)
                 source.palette_raw.append(deepcopy(entry))
             remap.append(palette[state])
-        visible = np.array([str(entry["Name"]) not in AIR_NAMES for entry in entries])[indices]
+        empty = {'minecraft:air'} if exact_air else AIR_NAMES
+        visible = np.array([str(entry["Name"]) not in empty for entry in entries])[indices]
         if len(source.present) + int(visible.sum()) > max_blocks:
             raise ValueError("World view exceeds the block budget; reduce the radius")
         mapped = np.asarray(remap, dtype=np.int32)[indices]
-        if isinstance(source.present, BlockArray):
+        if isinstance(source.present, (BlockArray, SectionArray)):
             grid = np.where(visible, mapped, -1).reshape(16, 16, 16).transpose(2, 0, 1)
             lower = (cx * 16 - origin[0], y - origin[1], cz * 16 - origin[2])
             source.present.set_region(lower, grid)

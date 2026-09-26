@@ -177,3 +177,24 @@ def test_world_filters_dimensions_deduplicates_players_and_reports_invalid_entit
 
     assert [str(entity["nbt"]["id"]) for entity in region.structure.entities] == ["minecraft:player"]
     assert len(region.notices) == 1 and "position" in region.notices[0]
+
+
+def test_sparse_world_box_and_direct_cells_match_negative_chunk(world):
+    from structura_core.world import read_world_box
+    from structura_core.world_chunks import chunk_cells
+    from structura_core.section_array import SectionArray
+
+    region = read_world_box(world.path / 'region', (-1000000, -16, -1000000), (1000000, 1, 1000000),
+                            world.data_version, columns=((-1, -1),))
+    source = region.structure
+    assert isinstance(source.present, SectionArray) and len(source.present) == 1
+    assert len(list(source.present.addresses())) == 1
+    root = read_chunk(world.path / 'region', -1, -1)
+    assert list(chunk_cells(root, [(-1, -1, -1)])) == [((-1, -1, -1), 'minecraft:stone', None)]
+    with pytest.raises(ValueError, match='coordinates'):
+        list(chunk_cells(root, [(0, -1, -1)]))
+    body = root.get('Level', root)
+    sections = body.get('sections', body.get('Sections'))
+    sections.append(sections[0])
+    with pytest.raises(ValueError, match='Duplicate section'):
+        list(chunk_cells(root, [(-1, -1, -1)]))

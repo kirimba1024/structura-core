@@ -15,6 +15,7 @@ from .limits import DEFAULT_MAX_NBT_BYTES
 from .nbt_io import PathInput, load_root, read_root
 from .validation import int32 as _integer, vector as _vector
 from .block_array import BlockArray
+from .section_array import SectionArray
 
 Position = Tuple[int, int, int]
 State = Union[int, str]
@@ -125,9 +126,9 @@ class Structure:
         self.palette = [str(entry["Name"]) for entry in self.palette_raw]
         sx, sy, sz = self.size
         palette_size = min(len(self.palette), 2 ** 31)
-        if isinstance(self.present, BlockArray):
+        if isinstance(self.present, (BlockArray, SectionArray)):
             self.present.validate(self.size, palette_size)
-        for pos, index in (() if isinstance(self.present, BlockArray) else self.present.items()):
+        for pos, index in (() if isinstance(self.present, (BlockArray, SectionArray)) else self.present.items()):
             if type(pos) is tuple and len(pos) == 3:
                 x, y, z = pos
                 if (type(x) is int and type(y) is int and type(z) is int and type(index) is int

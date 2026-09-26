@@ -12,6 +12,7 @@ from amulet_nbt import (
     IntArrayTag,
     IntTag,
     ListTag,
+    NamedTag,
     ShortTag,
     StringTag,
 )
@@ -128,6 +129,10 @@ class Schematic:
         self._read_header()
         write_root(self._document, path, name="Schematic" if self.version < 3 and self.root is self._document else "")
         return Path(path)
+
+    def to_bytes(self) -> bytes:
+        self._read_header()
+        return NamedTag(self._document).save_to(compressed=False)
 
     def to_structure(self, *, max_blocks: int = DEFAULT_MAX_BLOCKS,
                      data_version: Optional[int] = None) -> Structure:
