@@ -28,3 +28,15 @@ def test_bounded_index_validates_selected_headers(tmp_path):
         existing_chunks(tmp_path, regions=((0, 0),))
     with pytest.raises(ValueError):
         existing_chunks(tmp_path, regions=(("../secret", 0),))
+
+
+@pytest.mark.parametrize('location', [1, 257, 511, 512])
+@pytest.mark.parametrize('index', [0, 511, 1023])
+def test_index_rejects_invalid_locations_anywhere_in_the_header(tmp_path, location, index):
+    path = tmp_path / 'r.-2.3.mca'
+    header(path, (0, 511, 1023))
+    data = bytearray(path.read_bytes())
+    struct.pack_into('>I', data, index * 4, location)
+    path.write_bytes(data)
+    with pytest.raises(ValueError, match='Invalid chunk location'):
+        existing_chunks(tmp_path)

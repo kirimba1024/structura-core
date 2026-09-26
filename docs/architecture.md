@@ -82,6 +82,9 @@ block NBT and existing-section coverage without materializing the empty bounding
 `SectionArray.set_region` validates the full numerical input before updating pages.
 `world_terrain.existing_chunks(regions=...)` limits inventory to requested region
 coordinates, reading only their headers. Omit the filter to inventory a whole dimension.
+Location validation and occupied-slot selection are vectorized per 1024-entry header;
+results retain sorted Python integer coordinates. Truncated headers and invalid nonzero
+locations remain errors, including while Minecraft is generating the world.
 `JavaWorld.read_region(vertical_radius=None)` reads the full height of actual saved
 sections in the requested columns. Explicit finite radii remain supported; missing
 sections are not generated. The editor defaults to this full-height mode.

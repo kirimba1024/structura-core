@@ -34,11 +34,12 @@ def existing_chunks(directory, *, regions=None):
             header = stream.read(8192)
         if len(header) != 8192:
             raise ValueError(f"Truncated region header: {path.name}")
-        for index, location in enumerate(np.frombuffer(header[:4096], dtype=">u4")):
-            if location:
-                if location >> 8 < 2 or not location & 255:
-                    raise ValueError(f"Invalid chunk location in {path.name}")
-                chunks.append((rx * 32 + index % 32, rz * 32 + index // 32))
+        locations = np.frombuffer(header, dtype=">u4", count=1024)
+        occupied = np.flatnonzero(locations)
+        values = locations[occupied]
+        if np.any((values >> 8 < 2) | ((values & 255) == 0)):
+            raise ValueError(f"Invalid chunk location in {path.name}")
+        chunks.extend((rx * 32 + index % 32, rz * 32 + index // 32) for index in occupied.tolist())
     return tuple(sorted(chunks))
 
 
