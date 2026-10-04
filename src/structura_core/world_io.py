@@ -4,8 +4,6 @@ from pathlib import Path
 
 
 def read_chunk(directory, cx, cz):
-    from amulet.level.formats.anvil_world.region import _decompress
-
     path = Path(directory) / f"r.{cx // 32}.{cz // 32}.mca"
     if not path.is_file():
         return None
@@ -46,4 +44,6 @@ def read_chunk(directory, cx, cz):
         if len(data) > 64 * 1024 * 1024:
             raise ValueError("External chunk exceeds the read budget")
         payload = bytes([payload[0] & 127]) + data
+    from amulet.level.formats.anvil_world.region import _decompress
+
     return _decompress(payload).compound

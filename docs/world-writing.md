@@ -50,6 +50,14 @@ paths. External `.mcc` files are included. File hashes are rechecked before
 replacement; an I/O error reports the backup path. Backups have no automatic
 retention policy. The return value is the backup directory, or `None` when the
 requested state is already on disk.
+Files of at least 1 MiB use manifest version 3: verified 64 KiB content pages
+are shared in `.structura/backup-blobs`, with order, length and permissions in
+the manifest. Restore verifies every page and the whole-file hash before installation.
+Manifest versions 1 and 2 remain readable; smaller backups still use version 2.
+Keep both `backups` and `backup-blobs` when copying a world. The manifest's original
+absolute world path is informational; membership and hashes determine restore validity.
+This reduces repeated backup storage, with extra page verification work; it does
+not promise faster installation. No revisions or pages are deleted automatically.
 In the manifest, a null original hash marks a file that did not exist before
 the save; restoring that entry means removing the newly created file.
 

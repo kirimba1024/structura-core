@@ -2,10 +2,13 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from uuid import uuid4
+
+from . import backup_content
 
 
 COMPLETE_PHASES = {"complete", "rolled_back", "preparing"}
@@ -62,7 +65,7 @@ def read_manifest(backup):
     if record.stat().st_size > MAX_MANIFEST_BYTES:
         raise ValueError("Backup manifest exceeds the size limit")
     manifest = json.loads(record.read_text())
-    if not isinstance(manifest, dict) or manifest.get("schema_version", 1) not in (1, 2):
+    if not isinstance(manifest, dict) or manifest.get("schema_version", 1) not in (1, 2, 3):
         raise ValueError("Unsupported backup manifest")
     files = manifest.get("files")
     if not isinstance(files, dict) or not files or len(files) > 100_000:
@@ -71,13 +74,21 @@ def read_manifest(backup):
         checked_path(Path(backup), relative)
         if stamp is not None and (not isinstance(stamp, str) or len(stamp) != 64 or any(c not in "0123456789abcdef" for c in stamp)):
             raise ValueError("Invalid hash in backup manifest")
-    if manifest.get("schema_version") == 2:
+    if manifest.get("schema_version", 1) >= 2:
         after = manifest.get("after")
         if not isinstance(after, dict) or after.keys() != files.keys():
             raise ValueError("Backup manifest is missing destination hashes")
         for stamp in after.values():
             if stamp is not None and (not isinstance(stamp, str) or len(stamp) != 64 or any(c not in "0123456789abcdef" for c in stamp)):
                 raise ValueError("Invalid destination hash in backup manifest")
+    if manifest.get('schema_version') == 3:
+        contents = manifest.get('chunks')
+        if not isinstance(contents, dict) or not contents.keys() <= files.keys():
+            raise ValueError('Invalid backup content table')
+        for relative, record in contents.items():
+            if files[relative] is None:
+                raise ValueError('Deleted backup file cannot have content')
+            backup_content.validate(record)
     installed = manifest.get("installed", [])
     if not isinstance(installed, list) or any(path not in files for path in installed):
         raise ValueError("Invalid installed files in backup manifest")
@@ -130,9 +141,15 @@ def require_complete_save(world):
 
 def verify_backup(backup, progress=None):
     root = Path(backup)
-    files = read_manifest(root)["files"]
+    manifest = read_manifest(root)
+    files = manifest["files"]
     for index, (relative, stamp) in enumerate(sorted(files.items()), 1):
-        if digest(checked_path(root, relative)) != stamp:
+        record = manifest.get('chunks', {}).get(relative)
+        try:
+            actual = backup_content.digest(root, record) if record else digest(checked_path(root, relative))
+        except (OSError, ValueError):
+            return False
+        if actual != stamp:
             return False
         if progress:
             progress("Verify backup", index, len(files))
@@ -150,6 +167,8 @@ def replace_file(source, target, expected):
                     shutil.copyfileobj(incoming, stream)
                 stream.flush()
                 os.fsync(stream.fileno())
+            mode_source = target if target.exists() else source
+            temporary.chmod(stat.S_IMODE(mode_source.stat().st_mode))
         if digest(target) != expected:
             raise ValueError(f"World changed while saving {target.name}")
         if temporary is None:
@@ -176,14 +195,20 @@ def install_staged(world, temporary, originals, changed, *, kind="save", progres
     name = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ-") + kind + "-" + uuid4().hex[:8]
     backup = world / ".structura" / "backups" / name
     backup.mkdir(parents=True)
-    manifest = {"schema_version": 2, "world": str(world.resolve()), "kind": kind,
+    chunked = {relative for relative, stamp in files.items() if stamp is not None and checked_path(temporary / 'before', relative).stat().st_size >= backup_content.MINIMUM_FILE_BYTES}
+    manifest = {"schema_version": 3 if chunked else 2, "world": str(world.resolve()), "kind": kind,
                 "phase": "preparing", "files": files, "after": after, "installed": []}
+    if chunked:
+        manifest['chunks'] = {}
     try:
         write_manifest(backup, manifest)
         for directory in (backup.parent, backup.parent.parent, world):
             sync_directory(directory)
         for relative, stamp in files.items():
             if stamp is not None:
+                if relative in chunked:
+                    manifest['chunks'][relative] = backup_content.store(checked_path(temporary / 'before', relative), backup, stamp, sync_directory)
+                    continue
                 target = checked_path(backup, relative)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(checked_path(temporary / "before", relative), target)
@@ -240,8 +265,6 @@ def _restore_backup(world, backup, progress=None, *, expected=None):
     manifest = read_manifest(source)
     if not source.resolve().is_relative_to((root / ".structura" / "backups").resolve()):
         raise ValueError("Choose a backup belonging to this world")
-    if manifest.get("world", str(root.resolve())) != str(root.resolve()):
-        raise ValueError("Backup belongs to a different world")
     if not verify_backup(source, progress):
         raise ValueError("Backup files no longer match their manifest hashes")
     if expected is not None:
@@ -262,7 +285,11 @@ def _restore_backup(world, backup, progress=None, *, expected=None):
             if stamp is not None:
                 after = checked_path(temporary / "after", relative)
                 after.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(checked_path(source, relative), after)
+                record = manifest.get('chunks', {}).get(relative)
+                if record:
+                    backup_content.materialize(source, record, after)
+                else:
+                    shutil.copy2(checked_path(source, relative), after)
                 if digest(after) != stamp:
                     raise ValueError(f"Backup changed during restore: {relative}")
         safety = install_staged(root, temporary, originals, set(originals), kind="restore", progress=progress)

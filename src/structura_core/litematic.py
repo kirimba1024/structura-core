@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 
+import numpy as np
 from amulet_nbt import (
     CompoundTag,
     DoubleTag,
@@ -22,6 +23,8 @@ from amulet_nbt import (
 )
 
 from .blockstates import AIR_NAMES, parse_state, validate_palette
+from .block_array import BlockArray
+from .section_array import SectionArray
 from .limits import DEFAULT_MAX_BLOCKS, DEFAULT_MAX_NBT_BYTES
 from .limits import check_volume as _check_volume
 from .nbt_io import PathInput, load_root, write_root
@@ -54,22 +57,25 @@ def _unpack(words, count, palette_size):
     bits = max(2, (palette_size - 1).bit_length())
     if not isinstance(words, LongArrayTag) or len(words) != (count * bits + 63) // 64:
         raise ValueError("invalid Litematic BlockStates length or tag type")
-    mask = (1 << bits) - 1
-    for index in range(count):
-        word, offset = divmod(index * bits, 64)
-        value = (int(words[word]) & _WORD_MASK) >> offset
-        if offset + bits > 64:
-            value |= (int(words[word + 1]) & _WORD_MASK) << (64 - offset)
-        value &= mask
-        if value >= palette_size:
-            raise ValueError(f"invalid Litematic palette index {value} at cell {index}")
-        yield value
+    packed = np.asarray(words, dtype=np.int64).view(np.uint64)
+    positions = np.arange(count, dtype=np.uint64) * bits
+    locations, offsets = positions // 64, positions % 64
+    values = packed[locations] >> offsets
+    crossing = offsets + bits > 64
+    values[crossing] |= packed[locations[crossing] + 1] << (64 - offsets[crossing])
+    values &= (1 << bits) - 1
+    invalid = np.flatnonzero(values >= palette_size)
+    if len(invalid):
+        index = int(invalid[0])
+        raise ValueError(f"invalid Litematic palette index {int(values[index])} at cell {index}")
+    return values.astype(np.int32)
 
 
 def _pack(values, count, palette_size):
     bits = max(2, (palette_size - 1).bit_length())
     words = [0] * ((count * bits + 63) // 64)
     for index, value in enumerate(values):
+        value = int(value)
         word, offset = divmod(index * bits, 64)
         words[word] |= (value << offset) & _WORD_MASK
         if offset + bits > 64:
@@ -112,13 +118,9 @@ def _merge_region(result, region, origin, palette_lookup):
         remap.append(palette_lookup[key])
     delta = tuple(v - o for v, o in zip(region.minimum, origin))
     sx, sy, sz = region.size
-    for index, state in enumerate(_unpack(region.nbt.get("BlockStates"), sx * sy * sz, len(palette))):
-        y, rem = divmod(index, sx * sz)
-        z, x = divmod(rem, sx)
-        pos = tuple(v + d for v, d in zip((x, y, z), delta))
-        if pos in result.present:
-            raise ValueError(f"overlapping Litematic regions at {pos}; choose a named region")
-        result.present[pos] = remap[state]
+    values = _unpack(region.nbt.get("BlockStates"), sx * sy * sz, len(palette))
+    indices = np.asarray(remap, dtype=np.int32)[values].reshape(sy, sz, sx).transpose(2, 0, 1)
+    result.present.set_region(delta, indices)
     for raw in compound_list(region.nbt.get("TileEntities", ListTag()), "TileEntities"):
         local = _xyz(raw, "tile entity position")
         if any(not 0 <= v < s for v, s in zip(local, region.size)):
@@ -199,6 +201,10 @@ class Litematic:
             if name not in self.root["Regions"]:
                 raise ValueError(f"unknown Litematic region {name!r}; available: {self.region_names}")
             item = _Region.read(name, self.root["Regions"][name])
+            if any(all(a < b + size_b and b < a + size_a
+                       for a, size_a, b, size_b in zip(item.minimum, item.size, other.minimum, other.size))
+                   for other in prepared):
+                raise ValueError("overlapping Litematic regions; choose a named region")
             volume += math.prod(item.size)
             _check_volume(volume, max_blocks)
             prepared.append(item)
@@ -212,6 +218,7 @@ class Litematic:
             "palette": ListTag(), "blocks": ListTag(), "entities": ListTag(),
         })
         result = Structure.from_root(root)
+        result.present = BlockArray.empty(size) if math.prod(size) <= max_blocks else SectionArray(size)
         result.path = self.path
         palette_lookup = {}
         for item in prepared:

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Read SNBT in linear cursor order; preserve tag types and metadata.
+- Use gzip level 6 and avoid copying block fields that are replaced during writing.
+- Normalize Sponge/Litematic cells into numeric mappings without changing sparse or authored-air semantics.
+- Cache context-free Bedrock target translations while preserving loss counts and contextual fallback.
+- Keep optional Amulet out of base-only chunk checks and report expected CLI failures without tracebacks.
+- Preserve replacement permissions and allow verified backup restore after moving a world directory.
+- Share hashed 64 KiB backup pages for files of at least 1 MiB; retain all revisions and legacy manifests.
+- Do not transfer pillar axis properties to mushroom stems.
+
 ## 0.6.6
 
 - Read sparse world boxes through an injected chunk reader; preserve exact air variants and block data.

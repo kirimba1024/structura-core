@@ -2,7 +2,10 @@ import logging
 from contextlib import contextmanager
 from dataclasses import dataclass
 
-import amulet
+try:
+    import amulet
+except ImportError:
+    amulet = None
 from amulet_nbt import CompoundTag, IntTag, ListTag, StringTag
 
 
@@ -18,13 +21,20 @@ class LegacyBlocks:
 
 @contextmanager
 def open_legacy(path, quiet_errors):
+    if amulet is None:
+        raise ModuleNotFoundError("Legacy conversion needs: pip install 'structura-core[legacy]'", name="amulet")
+    from amulet.api.errors import LoaderNoneMatched
+
     logger = logging.getLogger("amulet")
     previous_level = logger.level
     level = None
     if quiet_errors:
         logger.setLevel(logging.CRITICAL)
     try:
-        level = amulet.load_level(path)
+        try:
+            level = amulet.load_level(path)
+        except LoaderNoneMatched as error:
+            raise ValueError(f"Cannot read legacy structure: {path}") from error
         yield level
     finally:
         try:

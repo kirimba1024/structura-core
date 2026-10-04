@@ -65,14 +65,8 @@ class StagedWorld:
         if (self.temporary / "after" / external).exists() or self.originals[external] is not None:
             self.changed.add(external)
 
-    def _check(self):
-        for relative, stamp in self.originals.items():
-            if digest(self.world / relative) != stamp:
-                raise ValueError(f"World changed while saving {relative}; retry Save")
-
     def install(self):
         for interface in self.regions.values():
             interface.unload()
         self.regions.clear()
-        self._check()
         return install_staged(self.world, self.temporary, self.originals, self.changed)

@@ -1,24 +1,24 @@
 import gzip
 import os
-import tempfile
+import stat
 import zlib
 from io import BytesIO
 from os import PathLike
 from pathlib import Path
 from typing import Union
+from uuid import uuid4
 
 from amulet_nbt import (
     CompoundTag,
     NamedTag,
     NBTLoadError,
-    SNBTParseError,
-    from_snbt,
     load as load_nbt,
     utf8_escape_decoder,
     utf8_escape_encoder,
 )
 
 from .limits import DEFAULT_MAX_NBT_BYTES
+from .snbt_reader import load_snbt
 
 PathInput = Union[str, PathLike[str]]
 
@@ -61,34 +61,13 @@ def load_root(path: PathInput, *, max_nbt_bytes: int = DEFAULT_MAX_NBT_BYTES,
     if Path(path).suffix.lower() == ".snbt":
         try:
             text = data.decode("utf-8").strip()
-            root = from_snbt(text)
-        except (SNBTParseError, UnicodeError, RecursionError) as error:
+            root = load_snbt(text)
+        except (ValueError, UnicodeError, RecursionError) as error:
             raise ValueError(f"invalid SNBT: {error}") from error
         if not isinstance(root, CompoundTag):
             raise ValueError("SNBT root must be a compound")
-        _check_snbt_end(text)
         return root
     return read_root(data, max_nbt_bytes=max_nbt_bytes, little_endian=little_endian)
-
-
-def _check_snbt_end(text):
-    depth, quote, escaped = 0, None, False
-    for index, character in enumerate(text):
-        if quote is not None:
-            if escaped:
-                escaped = False
-            elif character == "\\":
-                escaped = True
-            elif character == quote:
-                quote = None
-        elif character in "\"'":
-            quote = character
-        elif character == "{":
-            depth += 1
-        elif character == "}":
-            depth -= 1
-            if depth == 0 and index != len(text) - 1:
-                raise ValueError("invalid SNBT: trailing data after root compound")
 
 
 def write_root(root: CompoundTag, path: PathInput, compressed: bool = True, *, name: str = "",
@@ -101,7 +80,7 @@ def write_root(root: CompoundTag, path: PathInput, compressed: bool = True, *, n
         data = NamedTag(root, name).save_to(compressed=False, little_endian=little_endian, **options)
     if compressed and Path(path).suffix.lower() != ".snbt":
         output = BytesIO()
-        with gzip.GzipFile(fileobj=output, mode="wb", mtime=0) as stream:
+        with gzip.GzipFile(fileobj=output, mode="wb", compresslevel=6, mtime=0) as stream:
             stream.write(data)
         data = output.getvalue()
     atomic_write(path, data)
@@ -112,9 +91,12 @@ def atomic_write(path: PathInput, data: bytes) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
-        with tempfile.NamedTemporaryFile(dir=destination.parent, prefix=f".{destination.name}.", delete=False) as stream:
-            temporary = Path(stream.name)
+        temporary = destination.parent / f".{destination.name}.{uuid4().hex}"
+        descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666)
+        with os.fdopen(descriptor, "wb") as stream:
             stream.write(data)
+        if destination.exists():
+            temporary.chmod(stat.S_IMODE(destination.stat().st_mode))
         os.replace(temporary, destination)
     finally:
         if temporary is not None:

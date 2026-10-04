@@ -31,6 +31,7 @@ class _Bridge:
         self.versions = {}
         self.specs = {}
         self.cache = {}
+        self.target_cache = {}
         self.get_raw = None
 
     def version(self, platform, data_version):
@@ -130,6 +131,12 @@ class _Bridge:
 
     def convert(self, position):
         universal, entity = self.universal(position)
+        if entity is None and universal in self.target_cache:
+            output, losses = self.target_cache[universal]
+            self.losses.update(losses)
+            return output, None
+        before = self.losses.copy()
+        cacheable = entity is None
         output, block_entity = [], None
         for index, layer in enumerate(universal.block_tuple):
             block, nbt, needed = self.target.block.from_universal(
@@ -138,11 +145,15 @@ class _Bridge:
             if not isinstance(block, self.Block) or block.namespace != "minecraft":
                 raise ValueError(f"target cannot represent block {layer}; conversion to entities is unsupported")
             if needed:
+                cacheable = False
                 self.losses["target block translations need unavailable context"] += 1
+            if nbt is not None:
+                cacheable = False
             output.extend(block.block_tuple)
             if index == 0:
                 block_entity = nbt
-            restored, _, _ = self.target.block.to_universal(block, nbt, force_blockstate=True)
+            restored, _, context_needed = self.target.block.to_universal(block, nbt, force_blockstate=True)
+            cacheable = cacheable and not context_needed
             if restored != layer:
                 self.losses["block states do not survive a translation round trip"] += 1
         if self.target.platform == "java":
@@ -159,6 +170,8 @@ class _Bridge:
             output = [self.block(first.namespaced_name, properties)]
         if len(output) > 2:
             raise ValueError("Bedrock supports at most two block layers")
+        if cacheable and block_entity is None:
+            self.target_cache[universal] = (output, self.losses - before)
         return output, block_entity
 
     def report(self, strict):

@@ -5,6 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Optional, Tuple
 
+import numpy as np
 from amulet_nbt import (
     ByteArrayTag,
     CompoundTag,
@@ -18,6 +19,7 @@ from amulet_nbt import (
 )
 
 from .blockstates import parse_state
+from .block_array import BlockArray
 from .limits import DEFAULT_MAX_BLOCKS, DEFAULT_MAX_NBT_BYTES, check_volume
 from .nbt_io import PathInput, load_root, write_root
 from .structure import Structure
@@ -67,6 +69,19 @@ def _varints(data, count, palette, label):
         value = shift = 0
     if shift or decoded != count:
         raise ValueError(f"{label} is truncated; expected {count} cells, got {decoded}")
+
+
+def _decode_varints(data, count, palette, label):
+    if not isinstance(data, ByteArrayTag):
+        raise ValueError(f"{label} must be a byte array")
+    values = np.asarray(data, dtype=np.int8).view(np.uint8)
+    if len(values) == count and not np.any(values & 128):
+        valid = np.isin(values, list(palette))
+        if not np.all(valid):
+            missing = int(values[np.flatnonzero(~valid)[0]])
+            raise ValueError(f"{label} references unknown palette index {missing}")
+        return values.astype(np.int32)
+    return np.fromiter(_varints(data, count, palette, label), dtype=np.int32)
 
 
 def _payload(record, version, label):
@@ -162,10 +177,10 @@ class Schematic:
         sx, sy, sz = self.size
         if blocks is not None:
             data = blocks.get("BlockData" if self.version < 3 else "Data")
-            for index, state in enumerate(_varints(data, volume, palette, "BlockData")):
-                y, remainder = divmod(index, sx * sz)
-                z, x = divmod(remainder, sx)
-                result.present[(x, y, z)] = remap[state]
+            values = _decode_varints(data, volume, palette, "BlockData")
+            keys = np.array(sorted(palette), dtype=np.int32)
+            indices = np.array([remap[int(key)] for key in keys], dtype=np.int32)[np.searchsorted(keys, values)]
+            result.present = BlockArray(indices.reshape(sy, sz, sx).transpose(2, 0, 1).copy())
             entity_key = "TileEntities" if self.version == 1 else "BlockEntities"
             for record in compound_list(blocks.get(entity_key, ListTag()), entity_key):
                 if not isinstance(record.get("Pos"), IntArrayTag):

@@ -19,6 +19,7 @@ from .legacy_entities import (
     restore_sign_text,
 )
 from .nbt_io import load_root, write_root
+from .cli import run
 from .limits import DEFAULT_MAX_BLOCKS, DEFAULT_MAX_NBT_BYTES, check_volume
 from .validation import int32
 from .version import DATA_VERSION, JAVA_VERSION
@@ -67,7 +68,7 @@ def convert(src_path: str, dst_path: str, data_version: int, target_version=JAVA
     print(f"    block entities: {sum('nbt' in record for record in root['blocks'])}")
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("src", help="legacy .schematic path")
     ap.add_argument("dst", help="output vanilla structure .nbt path")
@@ -82,18 +83,18 @@ def main():
         default="1.21.1",
         help="Amulet block translation target, for example 1.21.1",
     )
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     try:
         target_version = tuple(int(part) for part in args.target_version.split("."))
     except ValueError:
         ap.error("--target-version must contain three integers, for example 1.21.1")
     if len(target_version) != 3:
         ap.error("--target-version must contain three integers, for example 1.21.1")
-    convert(
+    run(lambda: convert(
         args.src, args.dst, args.data_version, target_version,
         preserve_all_entities=args.all_entities,
         prepare_for_placement=False,
-    )
+    ))
 
 
 if __name__ == "__main__":

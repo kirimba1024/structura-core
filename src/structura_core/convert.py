@@ -3,11 +3,13 @@
 import argparse
 import math
 import warnings
+import sys
 from os import PathLike
 from pathlib import Path
 from typing import Optional, Tuple, Union
 
 from .bedrock import Mcstructure, export_mcstructure
+from .cli import run
 from .conversion_losses import ConversionWarning, conversion_losses, document_losses
 from .export_schematic import export_schematic
 from .formats import load_structure
@@ -100,15 +102,20 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         target_version = tuple(int(value) for value in args.target_version.split(".")) if args.target_version else None
+        if target_version is not None and (len(target_version) != 3 or any(value < 0 for value in target_version)):
+            raise ValueError("--target-version must contain three nonnegative integers, for example 1.21.0")
+    except ValueError as error:
+        parser.error(str(error))
+
+    def execute():
         with warnings.catch_warnings(record=True) as notices:
             warnings.simplefilter("always", ConversionWarning)
             convert_structure(args.src, args.output, region=args.region, palette_index=args.palette,
                               strict=args.strict, max_blocks=args.max_blocks, max_nbt_bytes=args.max_nbt_bytes,
                               source_data_version=args.source_data_version, target_version=target_version)
         for notice in notices:
-            parser._print_message(f"warning: {notice.message}\n")
-    except (ValueError, OSError, ImportError) as error:
-        parser.error(str(error))
+            print(f"warning: {notice.message}", file=sys.stderr)
+    run(execute)
     print(args.output)
 
 

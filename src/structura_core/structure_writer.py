@@ -63,10 +63,10 @@ def _write_blocks(src, size, shift, palettes, additions, replacements):
         _require_bounds(target, size)
         if target in replacements:
             continue
-        block = deepcopy(getattr(src, "_block_records", {}).get(pos, CompoundTag()))
+        original = getattr(src, "_block_records", {}).get(pos, {})
+        block = CompoundTag({key: deepcopy(value) for key, value in original.items() if key not in {"pos", "state", "nbt"}})
         block["pos"] = ListTag([IntTag(value) for value in target])
         block["state"] = IntTag(index)
-        block.pop("nbt", None)
         if pos in src.block_nbt:
             payload = src.block_nbt[pos]
             block["nbt"] = block_entity_at(payload, target) if any(shift) else deepcopy(payload)

@@ -2,7 +2,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List, MutableMapping, Optional, Set, Tuple, Union
 
-from amulet_nbt import CompoundTag, ListTag
+from amulet_nbt import CompoundTag, IntTag, ListTag
 
 from .blockstates import (
     AIR_NAMES as AIR_NAMES,
@@ -95,11 +95,17 @@ class Structure:
         for block in blocks:
             if not isinstance(block, CompoundTag) or not {"pos", "state"} <= block.keys():
                 raise ValueError(f"invalid block record in {self.path}")
-            pos = _vector(block["pos"], "block position")
+            coordinates = block["pos"]
+            if isinstance(coordinates, ListTag) and len(coordinates) == 3 and coordinates.list_data_type == 3:
+                pos = tuple(int(value) for value in coordinates)
+            else:
+                pos = _vector(coordinates, "block position")
             if pos in self.present:
                 raise ValueError(f"duplicate block position {pos} in {self.path}")
-            self.present[pos] = _integer(block["state"], "block state index")
-            self._block_records[pos] = block
+            state = block["state"]
+            self.present[pos] = int(state) if isinstance(state, IntTag) else _integer(state, "block state index")
+            if block.keys() - {"pos", "state", "nbt"}:
+                self._block_records[pos] = block
             if "nbt" in block:
                 self.block_nbt[pos] = block["nbt"]
         self.validate()

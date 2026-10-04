@@ -17,6 +17,7 @@ from amulet_nbt import (
 )
 
 from .nbt_io import PathInput, write_root
+from .cli import run
 from .structure import Structure, state_key
 from .validation import vector
 
@@ -100,15 +101,18 @@ def export_schematic(src: Structure, destination: PathInput, *, offset=(0, 0, 0)
     return destination
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("src")
     parser.add_argument("dst")
     parser.add_argument("--palette", type=int, default=0, help="Structure palette to export")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    src = Structure(args.src, palette_index=args.palette)
-    export_schematic(src, args.dst)
+    def execute():
+        src = Structure(args.src, palette_index=args.palette)
+        export_schematic(src, args.dst)
+        return src
+    src = run(execute)
     print(f"{args.dst} size={src.size} blocks={len(src.present)} entities={len(src.entities)}")
 
 

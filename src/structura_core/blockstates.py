@@ -72,6 +72,8 @@ FAMILIES = {
 
 
 def _family(name):
+    if name == "minecraft:mushroom_stem":
+        return None
     return next((family for family in FAMILIES if name.endswith("_" + family)), None)
 
 
@@ -90,4 +92,3 @@ def replace_material(source, target):
     if retained:
         new["Properties"] = CompoundTag(retained)
     return state_key(new)
-

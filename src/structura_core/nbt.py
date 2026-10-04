@@ -4,7 +4,6 @@ from .nbt_io import (
     PathInput as PathInput,
     _bounded_read as _bounded_read,
     _check_byte_limit as _check_byte_limit,
-    _check_snbt_end as _check_snbt_end,
     atomic_write as atomic_write,
     load_root as load_root,
     read_root as read_root,

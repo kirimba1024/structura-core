@@ -10,6 +10,7 @@ only by the corresponding conversion paths.
 | Module | Responsibility |
 |---|---|
 | `nbt_io` | Bounded NBT/SNBT reading, compression, encoding and atomic file replacement. It has no knowledge of the Structure document schema. |
+| `snbt_reader` | Cursor-based SNBT grammar over one immutable input, preserving native NBT tag types without suffix copies. |
 | `blockstates` | State syntax, canonical keys, palette validation and property-preserving material replacement. |
 | `validation` | Checked 32-bit integers, finite coordinate vectors and NBT container types. No document or I/O dependency. |
 | `structure` | `Structure`, palette variants, block records and document invariants. |
@@ -20,6 +21,8 @@ only by the corresponding conversion paths.
 | `nbt` | Re-export the established import paths for callers. |
 | `schematic`, `litematic`, `bedrock` | Read and validate their own document formats and translate them to the shared structure representation. |
 | `formats`, `convert` | Select the appropriate format operation and report conversion losses. |
+| `backup_content` | Hash-addressed 64 KiB pages for large backup files, validation and bounded materialization; no world installation policy. |
+| `cli` | Common expected-error and interrupt handling for command entry points. |
 
 `structure` depends on `nbt_io`; `structure_writer` depends on both. The
 compatibility module imports these implementations. New internal code should
